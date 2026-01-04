@@ -1,0 +1,43 @@
+name: Epic
+description: High-level objective (parent for stories) with tasklist
+title: "[Epic] <short title>"
+labels:
+  - "type: epic"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Заполните цель и область работ. Добавьте чек-лист задач (stories). 
+        Новые пункты можно конвертировать в issues через UI — это создаст связь "Tracked by".
+  - type: input
+    id: objective
+    attributes:
+      label: Objective
+      description: "Что хотим достичь (бизнес/техническая цель)"
+      placeholder: "Рефакторинг риск-менеджмента для фиксированного риска и дневных лимитов"
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: "Краткое описание объёма работ и границ"
+      placeholder: "RiskManager, Engine интеграция, журналирование, алерты"
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: "Как поймём, что эпик завершён?"
+      placeholder: "- Прошли интеграционные тесты, - Прогресс 100% по story, - Документация обновлена"
+  - type: textarea
+    id: tasklist
+    attributes:
+      label: Tasklist (Stories)
+      description: "Добавьте истории как чек-лист. Используйте #<номер> для существующих issues или конвертируйте пункты в issues."
+      value: |
+        - [ ] #<issue_number> Story: Инициализация RiskManager
+        - [ ] #<issue_number> Story: Расчёт размера позиции
+        - [ ] Story: Дневные лимиты и учёт активных сделок
+  - type: input
+    id: due
+    attributes:
+      label: Target date (optional)
+      placeholder: "YYYY-MM-DD"

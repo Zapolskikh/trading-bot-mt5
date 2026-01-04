@@ -1,0 +1,44 @@
+app:
+  mode: "paper"            # "live" | "paper" | "backtest"
+  symbols: ["EURUSD","GBPUSD"]
+  base_timeframe: "M15"
+  data_window: 500
+  barsize: "ask"           # "bid" | "ask" | "mid"
+
+risk:
+  per_trade_pct: 0.5
+  per_day_pct: 2.0
+  max_active_trades: 4
+  dynamic:
+    enabled: false
+
+strategy:
+  name: "MyStrategyV1"
+  indicators:
+    - type: "EMA"
+      period: 20
+    - type: "EMA"
+      period: 50
+    - type: "ATR"
+      period: 14
+  entry:
+    min_signal_strength: 0.6
+  exit:
+    atr_multiplier_sl: 1.5
+    atr_multiplier_tp: 2.0
+
+metatrader:
+  terminal_path: "/path/to/terminal"
+  account_id: 123456
+  server: "Broker-Server"
+  timeout_ms: 2000
+  retry:
+    attempts: 3
+    backoff_ms: 500
+
+telegram:
+  enabled: true
+
+journal:
+  path: "./journal"
+  rotate_daily: true

@@ -1,0 +1,7 @@
+pandas>=2.2
+numpy>=2.0
+pyyaml>=6.0
+python-dotenv>=1.0
+requests>=2.32
+# aiogram or python-telegram-bot (на выбор)
+aiogram>=3.4
