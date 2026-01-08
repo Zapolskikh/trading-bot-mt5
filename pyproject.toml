@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "trading-bot-mt5"
+version = "0.1.0"
+description = ""
+authors = ["Home Workstation <kursus1010@gmail.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pre-commit = "^4.3.0"
+requests = "^2.32.5"
+python-dotenv = "^1.2.1"
+metatrader5 = "^5.0.5388"
+pandas = "^2.3.3"
+numpy = "2.2.6"
+matplotlib = "^3.10.7"
+pandas-ta = "^0.4.71b0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+preview = true
+line-length = 120
+
+[tool.ruff]
+line-length = 120
+ignore = ["E501"]

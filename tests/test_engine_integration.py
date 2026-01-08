@@ -4,7 +4,8 @@ import os
 
 def test_engine_init(tmp_path):
     cfg_path = tmp_path / "cfg.yaml"
-    cfg_path.write_text("""
+    cfg_path.write_text(
+        """
 app:
   mode: "paper"
   symbols: ["EURUSD"]
@@ -22,7 +23,9 @@ telegram:
 journal:
   path: "%s"
   rotate_daily: false
-""" % (tmp_path / "journal"), encoding="utf-8")
+""" % (tmp_path / "journal"),
+        encoding="utf-8",
+    )
 
     engine = TradeEngine(str(cfg_path))
     assert engine.mt is not None
