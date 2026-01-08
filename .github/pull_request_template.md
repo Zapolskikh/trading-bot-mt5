@@ -8,6 +8,10 @@
 ### Example
 <!-- Add screenshots, logs, or example output if applicable -->
 
+### Testing
+
+- [ ] make check
+- [ ] make test
 
 ## Related Issue
 <!-- Link related issues using #issue_number -->

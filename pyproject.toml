@@ -16,6 +16,7 @@ pandas = "^2.3.3"
 numpy = "2.2.6"
 matplotlib = "^3.10.7"
 pandas-ta = "^0.4.71b0"
+pytest = "^9.0.2"
 
 
 [build-system]
