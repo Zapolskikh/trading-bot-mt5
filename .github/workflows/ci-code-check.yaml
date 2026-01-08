@@ -1,0 +1,35 @@
+name: Code check and fix dependencies
+
+on:
+  push:
+    branches:
+      - main
+    pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry 1.8.5
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          poetry --version
+
+      - name: Install dependencies with Poetry
+        run: poetry install --no-interaction
+
+      - name: Run codebase check
+        run: make check
+
+      - name: Run unit tests
+        run: make test

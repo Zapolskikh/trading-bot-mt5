@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
 import pandas as pd
-from src.common.types import Signal, ExitSignal, Side
+from common.types import Signal, ExitSignal
 
 
 class Strategy:

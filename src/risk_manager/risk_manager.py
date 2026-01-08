@@ -9,7 +9,7 @@ class RiskConfig:
     per_day_pct: float
     max_active_trades: int
     dynamic_enabled: bool = False
-    dynamic_rules: Dict = None
+    dynamic_rules: Optional[Dict] = None
 
 
 class RiskManager:

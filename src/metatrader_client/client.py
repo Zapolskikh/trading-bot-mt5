@@ -40,8 +40,16 @@ class MetaTraderClient:
         """
         return {}
 
-    def place_order(self, symbol: str, side: str, lots: float, sl: Optional[float], tp: Optional[float],
-                    type: str = "market", price: Optional[float] = None) -> str:
+    def place_order(
+        self,
+        symbol: str,
+        side: str,
+        lots: float,
+        sl: Optional[float],
+        tp: Optional[float],
+        type: str = "market",
+        price: Optional[float] = None,
+    ) -> str:
         """
         TODO: отправить заявку и вернуть order_id; обеспечить идемпотентность
         """

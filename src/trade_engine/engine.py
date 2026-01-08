@@ -1,14 +1,14 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional
+from typing import Optional
 from datetime import datetime
 
-from src.common.config import load_config
-from src.common.types import Signal, ExitSignal
-from src.metatrader_client.client import MetaTraderClient
-from src.risk_manager.risk_manager import RiskManager, RiskConfig
-from src.strategy.strategy import Strategy
-from src.alert_service.telegram import AlertService
-from src.journal_service.csv_journal import JournalService
+from common.config import load_config
+from common.types import Signal
+from metatrader_client.client import MetaTraderClient
+from risk_manager.risk_manager import RiskManager, RiskConfig
+from strategy.strategy import Strategy
+from alert_service.telegram import AlertService
+from journal_service.csv_journal import JournalService
 
 
 class TradeEngine:
@@ -24,13 +24,15 @@ class TradeEngine:
         self.config = load_config(config_path)
         self.mt = MetaTraderClient(self.config.get("metatrader", {}))
         risk_cfg = self.config.get("risk", {})
-        self.risk = RiskManager(RiskConfig(
-            per_trade_pct=risk_cfg.get("per_trade_pct", 0.5),
-            per_day_pct=risk_cfg.get("per_day_pct", 2.0),
-            max_active_trades=risk_cfg.get("max_active_trades", 4),
-            dynamic_enabled=risk_cfg.get("dynamic", {}).get("enabled", False),
-            dynamic_rules=risk_cfg.get("dynamic", {}),
-        ))
+        self.risk = RiskManager(
+            RiskConfig(
+                per_trade_pct=risk_cfg.get("per_trade_pct", 0.5),
+                per_day_pct=risk_cfg.get("per_day_pct", 2.0),
+                max_active_trades=risk_cfg.get("max_active_trades", 4),
+                dynamic_enabled=risk_cfg.get("dynamic", {}).get("enabled", False),
+                dynamic_rules=risk_cfg.get("dynamic", {}),
+            )
+        )
         self.strategy = Strategy(self.config.get("strategy", {}))
         journal_cfg = self.config.get("journal", {})
         self.journal = JournalService(journal_cfg.get("path", "./journal"), journal_cfg.get("rotate_daily", True))
@@ -78,12 +80,21 @@ class TradeEngine:
                     )
                     self.journal.log_order(
                         timestamp=datetime.utcnow().isoformat(),
-                        symbol=symbol, side=sig.side, type="market",
-                        price=sig.price, lots=lots, sl=sig.sl, tp=sig.tp,
-                        status="PLACED", order_id=order_id, trade_id="",
+                        symbol=symbol,
+                        side=sig.side,
+                        type="market",
+                        price=sig.price,
+                        lots=lots,
+                        sl=sig.sl,
+                        tp=sig.tp,
+                        status="PLACED",
+                        order_id=order_id,
+                        trade_id="",
                     )
                     self.alerts.send_signal(sig.__dict__)
-                    self.risk.register_new_trade(trade_id=order_id, risk_amount_currency=equity * (self.risk.config.per_trade_pct / 100.0))
+                    self.risk.register_new_trade(
+                        trade_id=order_id, risk_amount_currency=equity * (self.risk.config.per_trade_pct / 100.0)
+                    )
 
             # TODO: обработка exit сигналов и закрытие позиций
 
