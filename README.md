@@ -2,6 +2,25 @@
 
 Скелет проекта на основе HLD-архитектуры: модульный риск-менеджмент, клиент MetaTrader, независимая стратегия, TradeEngine-оркестратор, real-time мониторинг, Telegram-алерты и CSV-журнал.
 
+## Настройки для старта разработки
+- установить `Choco` на свой Windows [инструкция](https://chocolatey.org/install#individual)
+- установить `make` на свой компьютер
+```shell
+choco install make
+```
+- установить библиотеки и все зависимости, используй `make`
+```shell
+make install
+```
+- запустить unit tests локально
+```shell
+make test
+```
+- запустить проверку кода (статический и динамический анализ, линковщик, тд)
+```shell
+make check
+```
+
 ## Структура
 Смотри [ProjectStructure](docs/ProjectStructure.md).
 
