@@ -12,6 +12,8 @@ choco install make
 ```shell
 make install
 ```
+- заполни `.env` из `.env.example`
+- настрой config: `config/config.yaml` (копия из `config/config.example.yaml`)
 - запустить unit tests локально
 ```shell
 make test
@@ -20,18 +22,13 @@ make test
 ```shell
 make check
 ```
+- запусти: `python scripts/run_bot.py --config config/config.yaml`
 
 ## Структура
 Смотри [ProjectStructure](docs/ProjectStructure.md).
 
 ## Цели, модули и задачи
 Смотри [Workplan](docs/Workplan.md).
-
-## Быстрый старт (скелет)
-- Настрой config: `config/config.yaml` (копия из `config/config.example.yaml`)
-- Установи зависимости: `pip install -r requirements.txt`
-- Заполни `.env` из `.env.example`
-- Запусти: `python scripts/run_bot.py --config config/config.yaml`
 
 ## Примечание
 Проект — каркас; реализация методов помечена TODO по HLD.
