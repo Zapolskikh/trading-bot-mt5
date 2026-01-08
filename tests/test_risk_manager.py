@@ -1,4 +1,4 @@
-from src.risk_manager.risk_manager import RiskManager, RiskConfig
+from risk_manager.risk_manager import RiskManager, RiskConfig
 
 
 def test_can_open_trade_limits():

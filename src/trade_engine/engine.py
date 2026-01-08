@@ -2,13 +2,13 @@ from __future__ import annotations
 from typing import Optional
 from datetime import datetime
 
-from src.common.config import load_config
-from src.common.types import Signal
-from src.metatrader_client.client import MetaTraderClient
-from src.risk_manager.risk_manager import RiskManager, RiskConfig
-from src.strategy.strategy import Strategy
-from src.alert_service.telegram import AlertService
-from src.journal_service.csv_journal import JournalService
+from common.config import load_config
+from common.types import Signal
+from metatrader_client.client import MetaTraderClient
+from risk_manager.risk_manager import RiskManager, RiskConfig
+from strategy.strategy import Strategy
+from alert_service.telegram import AlertService
+from journal_service.csv_journal import JournalService
 
 
 class TradeEngine:

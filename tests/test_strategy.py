@@ -1,5 +1,6 @@
 import pandas as pd
-from src.strategy.strategy import Strategy
+
+from strategy.strategy import Strategy
 
 
 def test_compute_indicators_noop():
