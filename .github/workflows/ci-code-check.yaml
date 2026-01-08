@@ -28,7 +28,10 @@ jobs:
         run: |
           curl -sSL https://install.python-poetry.org | python - --version 1.8.5
           echo "$env:APPDATA\Python\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
-          poetry --version
+
+      - name: Verify Poetry
+        shell: pwsh
+        run: poetry --version
 
       - name: Install dependencies with Poetry
         shell: pwsh
