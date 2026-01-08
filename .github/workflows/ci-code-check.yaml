@@ -1,10 +1,10 @@
-name: Code check and fix dependencies
+name: Code check, unit test and fix dependencies
 
 on:
   push:
     branches:
       - main
-    pull_request:
+  pull_request:
 
 jobs:
   build:
@@ -19,14 +19,21 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install make
+        shell: pwsh
+        run: choco install make
+
       - name: Install Poetry 1.8.5
+        shell: pwsh
         run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          curl -sSL https://install.python-poetry.org | python -
+          echo "$env:APPDATA\Python\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
           poetry --version
 
       - name: Install dependencies with Poetry
-        run: poetry install --no-interaction
+        shell: pwsh
+        run: |
+          poetry install --no-interaction --no-root
 
       - name: Run codebase check
         run: make check
