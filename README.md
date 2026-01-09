@@ -1,4 +1,4 @@
-# Торговый бот — скелет проекта
+# Торговый бот — скелет проекта [![Code check, unit test and fix dependencies](https://github.com/Zapolskikh/trading-bot-mt5/actions/workflows/ci-code-check.yaml/badge.svg?branch=main)](https://github.com/Zapolskikh/trading-bot-mt5/actions/workflows/ci-code-check.yaml)
 
 Скелет проекта на основе HLD-архитектуры: модульный риск-менеджмент, клиент MetaTrader, независимая стратегия, TradeEngine-оркестратор, real-time мониторинг, Telegram-алерты и CSV-журнал.
 
