@@ -22,7 +22,12 @@ class TradeEngine:
 
     def __init__(self, config_path: str):
         self.config = load_config(config_path)
-        self.mt = MetaTraderClient(self.config.get("metatrader", {}))
+        mt_cfg = self.config.get("metatrader", {})
+        self.mt = MetaTraderClient(
+            login=mt_cfg.get("login"),
+            password=mt_cfg.get("password"),
+            server=mt_cfg.get("server"),
+        )
         risk_cfg = self.config.get("risk", {})
         self.risk = RiskManager(
             RiskConfig(
@@ -75,9 +80,17 @@ class TradeEngine:
                     self.alerts.send_risk_alert(f"{symbol} entry blocked: {reason}")
                 else:
                     lots = self.risk.compute_position_size(stop_distance_pips, pip_value_per_lot)
-                    order_id = self.mt.place_order(
-                        symbol=symbol, side=sig.side, lots=lots, sl=sig.sl, tp=sig.tp, type="market", price=sig.price
+                    resp = self.mt.place_order(
+                        symbol=symbol,
+                        side=sig.side,
+                        volume=lots,
+                        sl=sig.sl,
+                        tp=sig.tp,
+                        order_type="market",
+                        price=sig.price,
+                        volume_currency="lots",
                     )
+                    order_id = str(resp.get("ticket", ""))
                     self.journal.log_order(
                         timestamp=datetime.utcnow().isoformat(),
                         symbol=symbol,
