@@ -4,14 +4,7 @@ from datetime import datetime
 import pandas as pd
 import logging
 from decimal import Decimal, ROUND_HALF_UP
-
-
-def _mt5_module():
-    """Dynamic import for MetaTrader5 to avoid static import errors in non-configured environments."""
-    try:
-        return __import__("MetaTrader5")
-    except (ImportError, ModuleNotFoundError):
-        return None
+import MetaTrader5 as mt5
 
 
 class MetaTraderClient:
@@ -34,7 +27,6 @@ class MetaTraderClient:
         self.password = password
         self.server = server
         self.connected = False
-        self.mt5: Any = _mt5_module()
         self.logger = logging.getLogger(__name__)
 
     def connect(self, portable: bool = True) -> bool:
@@ -44,11 +36,6 @@ class MetaTraderClient:
         self.logger.info(f"[MT5] connect(login={masked_login}, server={masked_server})")
 
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                self.logger.error("[MT5] module not available — connection failed")
-                self.connected = False
-                return False
             # Initialize terminal with credentials and portable mode
             result = mt5.initialize(
                 login=self.login,
@@ -95,8 +82,7 @@ class MetaTraderClient:
         self.logger.info("[MT5] disconnect() called")
         if self.connected:
             try:
-                if self.mt5 is not None:
-                    self.mt5.shutdown()
+                mt5.shutdown()
             finally:
                 self.connected = False
                 self.logger.info("[MT5] disconnected")
@@ -104,10 +90,6 @@ class MetaTraderClient:
     def is_connected(self) -> bool:
         """Check if the MT5 terminal and account are available."""
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                self.logger.debug("[MT5] is_connected -> False (module missing)")
-                return False
             # terminal_info() and account_info() return None if not initialized/connected
             term_info = mt5.terminal_info()
             account_info = mt5.account_info()
@@ -128,9 +110,6 @@ class MetaTraderClient:
             return status
 
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                return status
             acc = mt5.account_info()
             ver = mt5.version()
             status.update(
@@ -150,10 +129,6 @@ class MetaTraderClient:
     def last_error(self) -> Tuple[int, str]:
         """Return the last MT5 error code and message (if available)."""
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                self.logger.debug("[MT5] last_error -> module missing")
-                return -1, "unknown"
             code, msg = mt5.last_error()
             self.logger.debug(f"[MT5] last_error -> {code} {msg}")
             return int(code), str(msg)
@@ -161,35 +136,27 @@ class MetaTraderClient:
             self.logger.exception("[MT5] last_error -> exception")
             return -1, "unknown"
 
-    def _ensure_mt5(
+    def _ensure_connected(
         self,
         context: str,
         error_factory: Callable[[str, int], Dict[str, Any]],
-    ) -> Tuple[Any, Optional[Dict[str, Any]]]:
+    ) -> Optional[Dict[str, Any]]:
         """Common pre-checks for trading operations.
 
-        Ensures connection and MT5 module availability. Returns a tuple of
-        (mt5_module, error_response). If an error occurs, mt5_module is None
-        and error_response contains a method-specific error dict from
-        ``error_factory``.
+        Ensures connection. Returns error_response dict if not connected,
+        None if connection is OK.
 
         Args:
             context: Method name for logging (e.g., "place_order").
             error_factory: Callable that builds an error dict for this method.
 
         Returns:
-            Tuple of (mt5_module, error_response).
+            Error dict if not connected, None otherwise.
         """
         if not self.is_connected():
             self.logger.error(f"[MT5] {context}: not connected")
-            return None, error_factory("Not connected to MT5", -1)
-
-        mt5: Any = self.mt5
-        if mt5 is None:
-            self.logger.error(f"[MT5] {context}: module missing")
-            return None, error_factory("MT5 module not available", -1)
-
-        return mt5, None
+            return error_factory("Not connected to MT5", -1)
+        return None
 
     def get_market_data(self, symbol: str, timeframe: str, window: int) -> pd.DataFrame:
         """Fetch OHLCV bars as pandas DataFrame indexed by time."""
@@ -200,11 +167,6 @@ class MetaTraderClient:
             return pd.DataFrame()
 
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                self.logger.error("[MT5] get_market_data: module missing")
-                return pd.DataFrame()
-
             # Map timeframe string to MT5 constant
             timeframe_map = {
                 "M1": mt5.TIMEFRAME_M1,
@@ -298,11 +260,6 @@ class MetaTraderClient:
             return {}
 
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                self.logger.error("[MT5] get_tick: module missing")
-                return {}
-
             # Request last tick for symbol
             tick = mt5.symbol_info_tick(symbol)
 
@@ -436,13 +393,11 @@ class MetaTraderClient:
                 "action": "none",
             }
 
-        mt5, err = self._ensure_mt5("place_order", _order_error)
+        err = self._ensure_connected("place_order", _order_error)
         if err:
             return err
 
         try:
-            # mt5 pre-checked above
-
             # 1. Валидация и конвертация объема
             actual_volume = volume
             if volume_currency.lower() == "usd":
@@ -644,13 +599,11 @@ class MetaTraderClient:
                 "new_values": {},
             }
 
-        mt5, err = self._ensure_mt5("modify_order", _modify_error)
+        err = self._ensure_connected("modify_order", _modify_error)
         if err:
             return err
 
         try:
-            # mt5 pre-checked above
-
             # 1. Получить информацию о существующем ордере
             orders = mt5.orders_get(ticket=order_id)
             if orders is None or len(orders) == 0:
@@ -788,13 +741,11 @@ class MetaTraderClient:
         def _cancel_error(comment: str, retcode: int = -1) -> Dict[str, Any]:
             return {"success": False, "ticket": 0, "retcode": retcode, "comment": comment}
 
-        mt5, err = self._ensure_mt5("cancel_order", _cancel_error)
+        err = self._ensure_connected("cancel_order", _cancel_error)
         if err:
             return err
 
         try:
-            # mt5 pre-checked above
-
             # 1. Получить информацию о ордере
             orders = mt5.orders_get(ticket=order_id)
             if orders is None or len(orders) == 0:
@@ -934,11 +885,6 @@ class MetaTraderClient:
             return []
 
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                self.logger.error("[MT5] get_orders: module missing")
-                return []
-
             # Получить все активные ордера
             orders = mt5.orders_get()
 
@@ -1042,11 +988,6 @@ class MetaTraderClient:
             return {}
 
         try:
-            mt5 = self.mt5
-            if mt5 is None:
-                self.logger.error("[MT5] get_symbol_info: module missing")
-                return {}
-
             # Get symbol info from MT5
             si = mt5.symbol_info(symbol)
             if si is None:
