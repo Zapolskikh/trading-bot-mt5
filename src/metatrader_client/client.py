@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple, Callable
+from typing import Any
 from datetime import datetime
 import pandas as pd
 import logging
@@ -18,940 +18,429 @@ class MetaTraderClient:
     - Данные портфеля
     """
 
-    def __init__(self, login: Optional[int] = None, password: Optional[str] = None, server: Optional[str] = None):
-        """Initialize MT5 client.
+    TIMEFRAMES = {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30,
+        "H1": mt5.TIMEFRAME_H1,
+        "H4": mt5.TIMEFRAME_H4,
+        "D1": mt5.TIMEFRAME_D1,
+        "W1": mt5.TIMEFRAME_W1,
+        "MN1": mt5.TIMEFRAME_MN1,
+    }
+    
+    # Max price slippage for market orders in points (10 points = 1 pip for 5-digit quotes)
+    # TODO: Move to config file (config.yaml or risk_manager settings)
+    DEVIATION = 10
+    
+    # EA identifier for MT5 (filters bot orders from manual/other bots)
+    # TODO: Move to config file (config.yaml)
+    MAGIC_NUMBER = 234567
 
-        Credentials are provided via constructor to avoid passing secrets to connect().
-        """
+
+    def __init__(self, login: int, password: str, server: str):
+        """Initialize MT5 client."""
         self.login = login
         self.password = password
         self.server = server
-        self.connected = False
-        self.logger = logging.getLogger(__name__)
+
 
     def connect(self, portable: bool = True) -> bool:
-        """Connect to the MT5 terminal using credentials provided in __init__."""
-        masked_login = str(self.login) if self.login is not None else "None"
-        masked_server = self.server or "None"
-        self.logger.info(f"[MT5] connect(login={masked_login}, server={masked_server})")
-
+        """Connect to the MT5 terminal."""
         try:
-            # Initialize terminal with credentials and portable mode
-            result = mt5.initialize(
-                login=self.login,
-                password=self.password,
-                server=self.server,
-                portable=portable,
-            )
-            if not result:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] initialize failed: {code} {msg}")
-                self.connected = False
+            if not mt5.initialize(self.login, self.password, self.server, portable=portable):
+                logging.error(f"[MT5] initialize failed: {mt5.last_error()}")
                 return False
 
-            # If credentials provided, ensure account login explicitly
-            if self.login is not None:
-                if not mt5.login(login=self.login, password=self.password, server=self.server):
-                    code, msg = self.last_error()
-                    self.logger.error(f"[MT5] login failed: {code} {msg}")
-                    self.connected = False
-                    return False
-
-            # Validate terminal/account status
-            term_info = mt5.terminal_info()
-            account_info = mt5.account_info()
-            if term_info is None or account_info is None:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] terminal/account not available: {code} {msg}")
-                self.connected = False
+            if not mt5.login(self.login, self.password, self.server):
+                logging.error(f"[MT5] login failed: {mt5.last_error()}")
                 return False
 
-            self.connected = True
-            self.logger.info(
-                "[MT5] connected:"
-                f" login={getattr(account_info, 'login', self.login)} server={getattr(account_info, 'server', self.server)}"
-            )
+            logging.info(f"[MT5] connected: login={self.login} server={self.server}")
             return True
         except Exception:
-            self.logger.exception("[MT5] unexpected error during connect")
-            self.connected = False
+            logging.exception("[MT5] connect failed")
             return False
+
 
     def disconnect(self):
-        """Disconnect from the MT5 terminal and reset local state."""
-        self.logger.info("[MT5] disconnect() called")
-        if self.connected:
-            try:
-                mt5.shutdown()
-            finally:
-                self.connected = False
-                self.logger.info("[MT5] disconnected")
+        """Disconnect from the MT5 terminal."""
+        mt5.shutdown()
 
-    def is_connected(self) -> bool:
-        """Check if the MT5 terminal and account are available."""
-        try:
-            # terminal_info() and account_info() return None if not initialized/connected
-            term_info = mt5.terminal_info()
-            account_info = mt5.account_info()
-            if term_info is None or account_info is None:
-                self.logger.debug("[MT5] is_connected -> False (no terminal/account)")
-                return False
-            self.logger.debug("[MT5] is_connected -> True")
-            return True
-        except Exception:
-            self.logger.exception("[MT5] is_connected -> False (exception)")
-            return False
-
-    def get_status(self) -> Dict[str, Any]:
-        """Return connection status and basic account/terminal info."""
-        self.logger.debug("[MT5] get_status()")
-        status: Dict[str, Any] = {"connected": self.is_connected()}
-        if not status["connected"]:
-            return status
-
-        try:
-            acc = mt5.account_info()
-            ver = mt5.version()
-            status.update(
-                {
-                    "login": acc.login if acc else self.login,
-                    "server": acc.server if acc else self.server,
-                    "balance": acc.balance if acc else None,
-                    "equity": acc.equity if acc else None,
-                    "build": ver[2] if isinstance(ver, tuple) and len(ver) >= 3 else None,
-                }
-            )
-        except Exception:
-            # Оставляем базовый статус
-            pass
-        return status
-
-    def last_error(self) -> Tuple[int, str]:
-        """Return the last MT5 error code and message (if available)."""
-        try:
-            code, msg = mt5.last_error()
-            self.logger.debug(f"[MT5] last_error -> {code} {msg}")
-            return int(code), str(msg)
-        except Exception:
-            self.logger.exception("[MT5] last_error -> exception")
-            return -1, "unknown"
-
-    def _ensure_connected(
-        self,
-        context: str,
-        error_factory: Callable[[str, int], Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
-        """Common pre-checks for trading operations.
-
-        Ensures connection. Returns error_response dict if not connected,
-        None if connection is OK.
-
-        Args:
-            context: Method name for logging (e.g., "place_order").
-            error_factory: Callable that builds an error dict for this method.
-
-        Returns:
-            Error dict if not connected, None otherwise.
-        """
-        if not self.is_connected():
-            self.logger.error(f"[MT5] {context}: not connected")
-            return error_factory("Not connected to MT5", -1)
-        return None
 
     def get_market_data(self, symbol: str, timeframe: str, window: int) -> pd.DataFrame:
         """Fetch OHLCV bars as pandas DataFrame indexed by time."""
-        self.logger.debug(f"[MT5] get_market_data(symbol={symbol}, timeframe={timeframe}, window={window})")
-
-        if not self.is_connected():
-            self.logger.warning("[MT5] get_market_data: not connected")
+        if timeframe not in self.TIMEFRAMES:
+            logging.error(f"[MT5] get_market_data: unsupported timeframe {timeframe}")
             return pd.DataFrame()
 
-        try:
-            # Map timeframe string to MT5 constant
-            timeframe_map = {
-                "M1": mt5.TIMEFRAME_M1,
-                "M5": mt5.TIMEFRAME_M5,
-                "M15": mt5.TIMEFRAME_M15,
-                "M30": mt5.TIMEFRAME_M30,
-                "H1": mt5.TIMEFRAME_H1,
-                "H4": mt5.TIMEFRAME_H4,
-                "D1": mt5.TIMEFRAME_D1,
-                "W1": mt5.TIMEFRAME_W1,
-                "MN1": mt5.TIMEFRAME_MN1,
-            }
+        # bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. 
+        # None in case of an error.
+        rates = mt5.copy_rates_from_pos(symbol, self.TIMEFRAMES[timeframe], 0, window)
 
-            if timeframe not in timeframe_map:
-                self.logger.error(f"[MT5] get_market_data: unsupported timeframe {timeframe}")
-                return pd.DataFrame()
-
-            tf = timeframe_map[timeframe]
-
-            # Request bars from MT5
-            rates = mt5.copy_rates_from_pos(symbol, tf, 0, window)
-
-            if rates is None or len(rates) == 0:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] get_market_data: copy_rates failed: {code} {msg}")
-                return pd.DataFrame()
-
-            # Convert to DataFrame with datetime index
-            data = []
-            for rate in rates:
-                data.append(
-                    {
-                        "time": datetime.fromtimestamp(rate[0]),
-                        "open": rate[1],
-                        "high": rate[2],
-                        "low": rate[3],
-                        "close": rate[4],
-                        "tick_volume": rate[5],
-                        "real_volume": rate[6],
-                        "spread": rate[7],
-                    }
-                )
-
-            df = pd.DataFrame(data)
-
-            # Set time as index and ensure proper datetime type
-            df["time"] = pd.to_datetime(df["time"])
-            df.set_index("time", inplace=True)
-
-            # Ensure data types are correct for technical analysis
-            for col in ["open", "high", "low", "close"]:
-                df[col] = df[col].astype(float)
-
-            for col in ["tick_volume", "real_volume", "spread"]:
-                df[col] = df[col].astype(int)
-
-            self.logger.debug(f"[MT5] get_market_data: fetched {len(df)} bars, shape={df.shape}")
-            return df
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] get_market_data: exception: {e}")
+        if rates is None or len(rates) == 0:
+            logging.error(f"[MT5] get_market_data failed: {mt5.last_error()}")
             return pd.DataFrame()
 
-    def get_tick(self, symbol: str) -> Dict[str, Any]:
-        """Получение последнего тика в реальном времени для символа.
+        # Convert numpy array to DataFrame directly
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df.set_index("time", inplace=True)
 
-        Тик содержит текущие цены bid/ask/last и объемы, необходим для:
-        - Проверки текущей цены перед открытием позиции
-        - Расчета маржи при открытии ордера
-        - Оценки ликвидности (spread между bid и ask)
-        - Валидации цены в Strategy перед входом
+        return df
 
-        Args:
-            symbol: Trading symbol (e.g., "EURUSD").
 
-        Returns:
-            Dict with tick data: {
-                "time": datetime,
-                "bid": float,      # Current bid price
-                "ask": float,      # Current ask price
-                "last": float,     # Last traded price
-                "volume": int,     # Current tick volume
-                "spread": float    # ask - bid spread
-            }
-            Returns empty dict if connection lost or symbol not available.
+    def get_tick(self, symbol: str) -> dict[str, Any]:
+        """Get last tick for symbol with bid/ask/last prices and volume.
+        
+        Returns empty dict if symbol not available.
         """
-        self.logger.debug(f"[MT5] get_tick(symbol={symbol})")
-
-        if not self.is_connected():
-            self.logger.warning("[MT5] get_tick: not connected")
+        tick = mt5.symbol_info_tick(symbol)
+        
+        if tick is None:
+            logging.error(f"[MT5] get_tick failed: {mt5.last_error()}")
             return {}
+        
+        return {
+            "time": datetime.fromtimestamp(tick.time),
+            "bid": tick.bid,
+            "ask": tick.ask,
+            "last": tick.last,
+            "volume": tick.volume,
+            "spread": tick.ask - tick.bid,
+        }
 
-        try:
-            # Request last tick for symbol
-            tick = mt5.symbol_info_tick(symbol)
-
-            if tick is None:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] get_tick: symbol_info_tick failed: {code} {msg}")
-                return {}
-
-            # Convert to dict with readable format
-            result = {
-                "time": datetime.fromtimestamp(tick.time),
-                "bid": tick.bid,
-                "ask": tick.ask,
-                "last": tick.last,
-                "volume": tick.volume,
-                "spread": tick.ask - tick.bid,
-            }
-
-            self.logger.debug(
-                f"[MT5] get_tick: {symbol} bid={tick.bid:.5f} ask={tick.ask:.5f} spread={result['spread']:.5f}"
-            )
-            return result
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] get_tick: exception: {e}")
-            return {}
 
     def place_order(
         self,
         symbol: str,
         side: str,
         volume: float,
-        sl: Optional[float] = None,
-        tp: Optional[float] = None,
+        sl: float | None = None,
+        tp: float | None = None,
         order_type: str = "market",
-        price: Optional[float] = None,
+        price: float | None = None,
         volume_currency: str = "lots",
-    ) -> Dict[str, Any]:
-        """Отправка торгового ордера в MT5 терминал.
-
-        ═══════════════════════════════════════════════════════════════════════════
-        MT5 ORDER_SEND SPECIFICATION
-        ═══════════════════════════════════════════════════════════════════════════
-
-        Метод использует mt5.order_send(MqlTradeRequest) для отправки торговых
-        операций. MqlTradeRequest содержит полное описание действия:
-
-        СТРУКТУРА ЗАПРОСА (MqlTradeRequest):
-        ────────────────────────────────────
-        - action: Тип операции (TRADE_ACTION_DEAL для рыночных/лимитных)
-        - magic: ID советника для аналитики
-        - symbol: Наименование инструмента (EURUSD, GBPUSD и т.д.)
-        - volume: Объем в ЛОТАХ (0.01, 0.1, 1.0, 10.0 и т.д.)
-        - type: Тип ордера (ORDER_TYPE_BUY, ORDER_TYPE_SELL и т.д.)
-        - price: Цена исполнения (не нужна для рыночных ордеров)
-        - sl: Цена Stop Loss (защита от убытков)
-        - tp: Цена Take Profit (фиксация прибыли)
-        - deviation: Макс отклонение от цены в пунктах (для рыночных)
-        - comment: Комментарий к ордеру
-
-        ТИПЫ ОРДЕРОВ (ORDER_TYPE):
-        ──────────────────────────
-        Рыночные (TRADE_ACTION_DEAL):
-        • ORDER_TYPE_BUY    - Рыночная покупка (исполняется по ASK)
-        • ORDER_TYPE_SELL   - Рыночная продажа (исполняется по BID)
-
-        Отложенные (TRADE_ACTION_PENDING):
-        • ORDER_TYPE_BUY_LIMIT   - Лимит покупка ниже цены
-        • ORDER_TYPE_SELL_LIMIT  - Лимит продажа выше цены
-        • ORDER_TYPE_BUY_STOP    - Стоп покупка выше цены
-        • ORDER_TYPE_SELL_STOP   - Стоп продажа ниже цены
-
-        КОНВЕРТАЦИЯ ОБЪЕМА:
-        ──────────────────
-        volume_currency может быть:
-        • "lots" (default) - объем уже в лотах, используется как есть
-        • "usd" - объем в долларах, конвертируется через usd_to_lots()
-        • "eur" - объем в евро, конвертируется через eur_to_lots()
-
-        Пример расчета: 10000 USD на EURUSD (contract_size=100000)
-        → lots = 10000 / 100000 = 0.1 лот
-
-        РЕЗУЛЬТАТ (MqlTradeResult):
-        ──────────────────────────
-        - retcode: Код результата (TRADE_RETCODE_DONE = успех)
-        - deal: Ticket сделки (если рыночный ордер исполнен)
-        - order: Ticket ордера (если отложенный ордер создан)
-        - volume: Реально исполненный объем
-        - price: Цена исполнения
-        - comment: Комментарий сервера об исполнении
-
+    ) -> dict[str, Any]:
+        """Send trading order to MT5.
+        
         Args:
-            symbol: Торговая пара (EURUSD, GBPUSD, XAUUSD и т.д.)
-            side: Направление торговли ("buy" или "sell")
-            volume: Объем торговли (размер зависит от volume_currency)
-            sl: Цена Stop Loss (опционально)
-            tp: Цена Take Profit (опционально)
-            order_type: Тип ордера ("market", "limit", "stop"). Default: "market"
-            price: Цена для лимит/стоп ордеров. Игнорируется для рыночных.
-            volume_currency: В какой валюте указан объем:
-                            "lots" - в лотах (default)
-                            "usd" - в долларах США
-                            "eur" - в евро
-
+            symbol: Trading pair (EURUSD, GBPUSD, etc.)
+            side: "buy" or "sell"
+            volume: Volume (depends on volume_currency)
+            sl: Stop Loss price
+            tp: Take Profit price
+            order_type: "market", "limit", or "stop"
+            price: Price for limit/stop orders
+            volume_currency: "lots" (default), "usd", or "eur"
+            
         Returns:
-            Dict с результатом исполнения:
-            {
-                "success": bool,           # True если ордер принят
-                "ticket": int,             # ID сделки/ордера
-                "volume": float,           # Реально исполненный объем
-                "price": float,            # Цена исполнения
-                "comment": str,            # Комментарий сервера
-                "retcode": int,            # Код ошибки (0 = успех)
-                "action": str              # Выполненное действие
-            }
-            Returns {"success": False, ...} если ошибка подключения/валидации.
+            {"success": bool, "ticket": int, "volume": float, "price": float, 
+             "comment": str, "retcode": int, "action": str}
         """
-        self.logger.info(
-            f"[MT5] place_order(symbol={symbol}, side={side}, volume={volume} {volume_currency}, type={order_type},"
-            f" price={price}, sl={sl}, tp={tp})"
-        )
+        # Convert volume if needed
+        actual_volume = volume
+        if volume_currency.lower() == "usd":
+            actual_volume = self.usd_to_lots(volume, symbol)
+            if actual_volume == 0:
+                logging.error(f"[MT5] place_order: USD→lots conversion failed")
+                return {"success": False, "ticket": 0, "volume": 0, "price": 0,
+                        "comment": "USD to lots conversion failed", "retcode": -1, "action": "none"}
+        elif volume_currency.lower() == "eur":
+            actual_volume = self.eur_to_lots(volume, symbol)
+            if actual_volume == 0:
+                logging.error(f"[MT5] place_order: EUR→lots conversion failed")
+                return {"success": False, "ticket": 0, "volume": 0, "price": 0,
+                        "comment": "EUR to lots conversion failed", "retcode": -1, "action": "none"}
 
-        def _order_error(comment: str, retcode: int = -1) -> Dict[str, Any]:
-            return {
-                "success": False,
-                "ticket": 0,
-                "volume": 0,
-                "price": 0,
-                "comment": comment,
-                "retcode": retcode,
-                "action": "none",
-            }
+        # Determine order configuration
+        side_lower = side.lower()
+        type_lower = order_type.lower()
+        
+        # Map (side, type) -> (action, order_type, requires_price)
+        order_config = {
+            ("buy", "market"): (mt5.TRADE_ACTION_DEAL, mt5.ORDER_TYPE_BUY, False),
+            ("sell", "market"): (mt5.TRADE_ACTION_DEAL, mt5.ORDER_TYPE_SELL, False),
+            ("buy", "limit"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_BUY_LIMIT, True),
+            ("sell", "limit"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_SELL_LIMIT, True),
+            ("buy", "stop"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_BUY_STOP, True),
+            ("sell", "stop"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_SELL_STOP, True),
+        }.get((side_lower, type_lower))
+        
+        if not order_config:  # Invalid side/type combination from user input
+            logging.error(f"[MT5] place_order: invalid side/type: {side}/{order_type}")
+            return {"success": False, "ticket": 0, "volume": 0, "price": 0,
+                    "comment": f"Invalid side/type: {side}/{order_type}", "retcode": -1, "action": "none"}
+        
+        order_action, order_type_const, requires_price = order_config
+        if requires_price and price is None:  # limit/stop require price
+            logging.error("[MT5] place_order: price required for limit/stop")
+            return {"success": False, "ticket": 0, "volume": 0, "price": 0,
+                    "comment": "Price is required for limit/stop orders", "retcode": -1, "action": "none"}
 
-        err = self._ensure_connected("place_order", _order_error)
-        if err:
-            return err
+        # Build request
+        request = {
+            "action": order_action,
+            "symbol": symbol,
+            "volume": float(actual_volume),
+            "type": order_type_const,
+            "price": float(price) if price else 0.0,
+            "sl": float(sl) if sl else 0.0,
+            "tp": float(tp) if tp else 0.0,
+            "magic": self.MAGIC_NUMBER,
+            "comment": f"[TradingBot] {side_lower} {type_lower}",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_FOK if type_lower == "market" else mt5.ORDER_FILLING_IOC,
+        }
+        
+        if type_lower == "market":
+            request["deviation"] = self.DEVIATION
 
-        try:
-            # 1. Валидация и конвертация объема
-            actual_volume = volume
-            if volume_currency.lower() == "usd":
-                actual_volume = self.usd_to_lots(volume, symbol)
-                if actual_volume == 0:
-                    self.logger.error("[MT5] place_order: USD to lots conversion failed")
-                    return {
-                        "success": False,
-                        "ticket": 0,
-                        "volume": 0,
-                        "price": 0,
-                        "comment": "USD to lots conversion failed",
-                        "retcode": -1,
-                        "action": "none",
-                    }
-                self.logger.debug(f"[MT5] place_order: converted {volume} USD → {actual_volume} lots")
+        # Send order
+        result = mt5.order_send(request)
+        if result is None:
+            logging.error(f"[MT5] place_order: order_send failed: {mt5.last_error()}")
+            return {"success": False, "ticket": 0, "volume": 0, "price": 0,
+                    "comment": "order_send failed", "retcode": -1, "action": "none"}
 
-            elif volume_currency.lower() == "eur":
-                actual_volume = self.eur_to_lots(volume, symbol)
-                if actual_volume == 0:
-                    self.logger.error("[MT5] place_order: EUR to lots conversion failed")
-                    return {
-                        "success": False,
-                        "ticket": 0,
-                        "volume": 0,
-                        "price": 0,
-                        "comment": "EUR to lots conversion failed",
-                        "retcode": -1,
-                        "action": "none",
-                    }
-                self.logger.debug(f"[MT5] place_order: converted {volume} EUR → {actual_volume} lots")
+        # Process result
+        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        response = {
+            "success": success,
+            "ticket": result.order or result.deal or 0,
+            "volume": getattr(result, "volume", actual_volume),
+            "price": getattr(result, "price", price or 0.0),
+            "comment": getattr(result, "comment", ""),
+            "retcode": result.retcode,
+            "action": f"{side_lower} {type_lower}",
+        }
 
-            # 2. Определение конфигурации ордера через mapping
-            side_lower = side.lower()
-            type_lower = order_type.lower()
-            mapping = {
-                ("buy", "market"): (mt5.TRADE_ACTION_DEAL, mt5.ORDER_TYPE_BUY, False),
-                ("sell", "market"): (mt5.TRADE_ACTION_DEAL, mt5.ORDER_TYPE_SELL, False),
-                ("buy", "limit"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_BUY_LIMIT, True),
-                ("sell", "limit"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_SELL_LIMIT, True),
-                ("buy", "stop"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_BUY_STOP, True),
-                ("sell", "stop"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_SELL_STOP, True),
-            }
+        if success:
+            logging.info(f"[MT5] place_order SUCCESS: ticket={response['ticket']}, vol={response['volume']}, price={response['price']}")
+        else:
+            logging.warning(f"[MT5] place_order FAILED: retcode={result.retcode}, comment={response['comment']}")
 
-            config = mapping.get((side_lower, type_lower))
-            if config is None:
-                self.logger.error(f"[MT5] place_order: invalid side/type: {side}/{order_type}")
-                return _order_error(f"Invalid side/type: {side}/{order_type}")
+        return response
 
-            order_action, order_type_const, requires_price = config
-            if requires_price and price is None:
-                self.logger.error("[MT5] place_order: price is required for limit/stop")
-                return _order_error("Price is required for limit/stop orders")
-
-            # 3. Построение MqlTradeRequest структуры
-            # Разные параметры для маркет и отложенных ордеров
-            is_pending_order = order_type.lower() in ("limit", "stop")
-
-            request = {
-                "action": order_action,
-                "symbol": symbol,
-                "volume": float(actual_volume),
-                "type": order_type_const,
-                "price": float(price) if price is not None else 0.0,
-                "sl": float(sl) if sl is not None else 0.0,
-                "tp": float(tp) if tp is not None else 0.0,
-                "magic": 42,  # ID советника для аналитики
-                "comment": f"[TradingBot] {side_lower} {order_type}",
-                "type_time": mt5.ORDER_TIME_GTC,  # Good Till Cancel (до отмены)
-            }
-
-            # Для маркет-ордеров добавляем deviation и ORDER_FILLING_FOK
-            if not is_pending_order:
-                request["deviation"] = 10  # макс отклонение в пунктах для рыночных
-                request["type_filling"] = mt5.ORDER_FILLING_FOK  # Fill or Kill для маркет
-            else:
-                # Для отложенных ордеров используем ORDER_FILLING_IOC
-                request["type_filling"] = mt5.ORDER_FILLING_IOC  # Immediate or Cancel для отложенных
-
-            self.logger.debug(f"[MT5] place_order: sending request: {request}")
-
-            # 4. Отправка ордера в MT5
-            result = mt5.order_send(request)
-
-            if result is None:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] place_order: order_send returned None: {code} {msg}")
-                return _order_error(f"order_send failed: {msg}", code)
-
-            # 5. Обработка результата
-            retcode = result.retcode
-            success = retcode == mt5.TRADE_RETCODE_DONE
-
-            response = {
-                "success": success,
-                "ticket": result.order if result.order else result.deal if result.deal else 0,
-                "volume": result.volume if hasattr(result, "volume") else actual_volume,
-                "price": result.price if hasattr(result, "price") else price or 0.0,
-                "comment": result.comment if hasattr(result, "comment") else "",
-                "retcode": retcode,
-                "action": f"{side_lower} {order_type}",
-            }
-
-            if success:
-                self.logger.info(
-                    f"[MT5] place_order: SUCCESS! Ticket={response['ticket']}, Volume={response['volume']},"
-                    f" Price={response['price']}"
-                )
-            else:
-                self.logger.warning(f"[MT5] place_order: FAILED! Retcode={retcode}, Comment={response['comment']}")
-
-            return response
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] place_order: exception: {e}")
-            return _order_error(f"Exception: {str(e)}")
 
     def modify_order(
         self,
         order_id: int,
-        sl: Optional[float] = None,
-        tp: Optional[float] = None,
-        price: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """Модификация параметров существующего ордера (SL/TP/цена).
-
-        ═══════════════════════════════════════════════════════════════════════════
-        MT5 ORDER_MODIFY SPECIFICATION
-        ═══════════════════════════════════════════════════════════════════════════
-
-        Метод используется для изменения параметров АКТИВНОГО отложенного ордера
-        (не сделки, которая уже исполнена). Может быть изменено:
-        - price: Новая цена триггера (для BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP)
-        - sl: Stop Loss цена
-        - tp: Take Profit цена
-
-        ОГРАНИЧЕНИЯ:
-        ────────────
-        • Для рыночных позиций (DEAL) используй close_position() или изменяй через
-          OrderModify() только параметры SL/TP открытой позиции
-        • Для отложенных ордеров (PENDING) можно менять цену и SL/TP
-        • SL всегда ниже текущей цены для BUY, выше для SELL
-        • TP всегда выше текущей цены для BUY, ниже для SELL
-        • Нельзя закрывать ордер через modify - используй order_send() с TRADE_ACTION_REMOVE
-
-        СТРУКТУРА ЗАПРОСА (MqlTradeRequest):
-        ────────────────────────────────────
-        - action: TRADE_ACTION_MODIFY (только для отложенных ордеров)
-        - order: Ticket существующего ордера (который менять)
-        - symbol: Наименование инструмента (должно совпадать с символом ордера)
-        - volume: Новый объем (опционально, если меняем)
-        - price: Новая цена триггера (для limit/stop ордеров)
-        - sl: Новая цена Stop Loss
-        - tp: Новая цена Take Profit
-        - comment: Новый комментарий (опционально)
-        - type_filling: ORDER_FILLING_RETURN (стандартное)
-        - type_time: ORDER_TIME_GTC (Good Till Cancel)
-
-        РЕЗУЛЬТАТ (MqlTradeResult):
-        ──────────────────────────
-        - retcode: Код результата (TRADE_RETCODE_DONE = успех)
-        - order: Ticket модифицированного ордера
-        - comment: Комментарий сервера
-
-        КОДЫ ОШИБОК:
-        ────────────
-        • TRADE_RETCODE_DONE (10009) - успешно
-        • TRADE_RETCODE_INVALID_TRADE (10006) - ордер не найден или не активен
-        • TRADE_RETCODE_PRICE_OFF (10015) - неправильная цена (вне допустимого диапазона)
-        • TRADE_RETCODE_INVALID_STOPS (10017) - неправильные SL/TP
-
+        sl: float | None = None,
+        tp: float | None = None,
+        price: float | None = None,
+    ) -> dict[str, Any]:
+        """Modify existing pending order (SL/TP/price).
+        
         Args:
-            order_id: Ticket активного ордера для модификации (целое число)
-            sl: Новая цена Stop Loss (опционально)
-            tp: Новая цена Take Profit (опционально)
-            price: Новая цена триггера для limit/stop ордеров (опционально)
-
+            order_id: Order ticket to modify
+            sl: New Stop Loss price
+            tp: New Take Profit price
+            price: New trigger price for limit/stop orders
+            
         Returns:
-            Dict с результатом:
-            {
-                "success": bool,           # True если модификация успешна
-                "ticket": int,             # Ticket модифицированного ордера
-                "retcode": int,            # Код результата
-                "comment": str,            # Комментарий сервера
-                "old_values": Dict,        # Старые значения (price, sl, tp)
-                "new_values": Dict         # Новые значения (price, sl, tp)
-            }
-            Returns {"success": False, ...} если ошибка подключения/валидации.
+            {"success": bool, "ticket": int, "retcode": int, "comment": str,
+             "old_values": dict, "new_values": dict}
         """
-        self.logger.info(f"[MT5] modify_order(order_id={order_id}, sl={sl}, tp={tp}, price={price})")
+        # Get existing order
+        orders = mt5.orders_get(ticket=order_id)
+        if orders is None or len(orders) == 0:
+            logging.error(f"[MT5] modify_order: order {order_id} not found: {mt5.last_error()}")
+            return {"success": False, "ticket": 0, "retcode": -1, "comment": "Order not found",
+                    "old_values": {}, "new_values": {}}
 
-        def _modify_error(comment: str, retcode: int = -1) -> Dict[str, Any]:
-            return {
-                "success": False,
-                "ticket": 0,
-                "retcode": retcode,
-                "comment": comment,
-                "old_values": {},
-                "new_values": {},
-            }
+        order = orders[0]
+        
+        # Save old values
+        old_values = {
+            "price": getattr(order, "price_open", 0.0),
+            "sl": getattr(order, "sl", 0.0),
+            "tp": getattr(order, "tp", 0.0),
+        }
 
-        err = self._ensure_connected("modify_order", _modify_error)
-        if err:
-            return err
+        # Build request
+        request = {
+            "action": mt5.TRADE_ACTION_MODIFY,
+            "order": order_id,
+            "symbol": order.symbol,
+            "price": price if price is not None else old_values["price"],
+            "sl": sl if sl is not None else old_values["sl"],
+            "tp": tp if tp is not None else old_values["tp"],
+            "magic": self.MAGIC_NUMBER,
+            "comment": "[TradingBot] modified",
+            "type_filling": mt5.ORDER_FILLING_RETURN,
+            "type_time": mt5.ORDER_TIME_GTC,
+        }
 
-        try:
-            # 1. Получить информацию о существующем ордере
-            orders = mt5.orders_get(ticket=order_id)
-            if orders is None or len(orders) == 0:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] modify_order: order {order_id} not found: {code} {msg}")
-                return _modify_error(f"Order not found: {msg}", code)
+        # Send modification
+        result = mt5.order_send(request)
+        if result is None:
+            logging.error(f"[MT5] modify_order: order_send failed: {mt5.last_error()}")
+            return {"success": False, "ticket": 0, "retcode": -1, "comment": "order_send failed",
+                    "old_values": old_values, "new_values": {}}
 
-            order = orders[0]
+        # Process result
+        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        new_values = {
+            "price": price if price is not None else old_values["price"],
+            "sl": sl if sl is not None else old_values["sl"],
+            "tp": tp if tp is not None else old_values["tp"],
+        }
 
-            # Сохранить старые значения
-            old_values = {
-                "price": order.price_open if hasattr(order, "price_open") else 0.0,
-                "sl": order.sl if hasattr(order, "sl") else 0.0,
-                "tp": order.tp if hasattr(order, "tp") else 0.0,
-            }
+        response = {
+            "success": success,
+            "ticket": getattr(result, "order", order_id),
+            "retcode": result.retcode,
+            "comment": getattr(result, "comment", ""),
+            "old_values": old_values,
+            "new_values": new_values,
+        }
 
-            self.logger.debug(f"[MT5] modify_order: found order {order_id}: symbol={order.symbol}, state={order.state}")
-            self.logger.debug(
-                f"[MT5] modify_order: old values - price={old_values['price']:.5f}, sl={old_values['sl']:.5f},"
-                f" tp={old_values['tp']:.5f}"
-            )
+        if success:
+            logging.info(f"[MT5] modify_order SUCCESS: ticket={order_id}, price={old_values['price']:.5f}→{new_values['price']:.5f}, sl={old_values['sl']:.5f}→{new_values['sl']:.5f}, tp={old_values['tp']:.5f}→{new_values['tp']:.5f}")
+        else:
+            logging.warning(f"[MT5] modify_order FAILED: retcode={result.retcode}, comment={response['comment']}")
 
-            # 2. Построить MqlTradeRequest
-            request = {
-                "action": mt5.TRADE_ACTION_MODIFY,
-                "order": order_id,
-                "symbol": order.symbol,
-                "price": price if price is not None else old_values["price"],
-                "sl": sl if sl is not None else old_values["sl"],
-                "tp": tp if tp is not None else old_values["tp"],
-                "magic": 42,
-                "comment": "[TradingBot] modified",
-                "type_filling": mt5.ORDER_FILLING_RETURN,
-                "type_time": mt5.ORDER_TIME_GTC,
-            }
+        return response
 
-            self.logger.debug(f"[MT5] modify_order: sending request: {request}")
 
-            # 3. Отправить запрос на модификацию
-            result = mt5.order_send(request)
-
-            if result is None:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] modify_order: order_send returned None: {code} {msg}")
-                resp = _modify_error(f"order_send failed: {msg}", code)
-                resp["old_values"] = old_values
-                return resp
-
-            # 4. Обработать результат
-            retcode = result.retcode
-            success = retcode == mt5.TRADE_RETCODE_DONE
-
-            new_values = {
-                "price": price if price is not None else old_values["price"],
-                "sl": sl if sl is not None else old_values["sl"],
-                "tp": tp if tp is not None else old_values["tp"],
-            }
-
-            response = {
-                "success": success,
-                "ticket": result.order if hasattr(result, "order") else order_id,
-                "retcode": retcode,
-                "comment": result.comment if hasattr(result, "comment") else "",
-                "old_values": old_values,
-                "new_values": new_values,
-            }
-
-            if success:
-                self.logger.info(f"[MT5] modify_order: SUCCESS! Order {order_id} modified")
-                self.logger.debug(
-                    f"[MT5]   Price: {old_values['price']:.5f} → {new_values['price']:.5f}\n[MT5]   SL:   "
-                    f" {old_values['sl']:.5f} → {new_values['sl']:.5f}\n[MT5]   TP:    {old_values['tp']:.5f} →"
-                    f" {new_values['tp']:.5f}"
-                )
-            else:
-                self.logger.warning(f"[MT5] modify_order: FAILED! Retcode={retcode}, Comment={response['comment']}")
-
-            return response
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] modify_order: exception: {e}")
-            return _modify_error(f"Exception: {str(e)}")
-
-    def cancel_order(self, order_id: int) -> Dict[str, Any]:
-        """Отмена (удаление) активного отложенного ордера.
-
-        ═══════════════════════════════════════════════════════════════════════════
-        MT5 ORDER_CANCEL SPECIFICATION
-        ═══════════════════════════════════════════════════════════════════════════
-
-        Метод удаляет активный отложенный ордер из очереди. Ордер должен быть
-        в состоянии ORDER_STATE_PLACED (активный). После отмены ордер переходит
-        в состояние ORDER_STATE_CANCELED.
-
-        ВАЖНО:
-        ──────
-        • Нельзя отменить уже ИСПОЛНЕННЫЙ ордер (сделку) - используй close_position()
-        • Нельзя отменить позицию (открытую сделку) - используй close_position()
-        • Можно отменить только ЗАЯВКУ (отложенный ордер) - BUY_LIMIT, SELL_LIMIT и т.д.
-
-        СТРУКТУРА ЗАПРОСА (MqlTradeRequest):
-        ────────────────────────────────────
-        - action: TRADE_ACTION_REMOVE (удаление ордера)
-        - order: Ticket ордера для отмены
-        - symbol: Наименование инструмента (должно совпадать с символом ордера)
-        - comment: Опциональный комментарий причины отмены
-
-        РЕЗУЛЬТАТ (MqlTradeResult):
-        ──────────────────────────
-        - retcode: Код результата (TRADE_RETCODE_DONE = успех)
-        - order: Ticket удаленного ордера
-        - comment: Комментарий сервера
-
-        КОДЫ ОШИБОК:
-        ────────────
-        • TRADE_RETCODE_DONE (10009) - ордер успешно отменен
-        • TRADE_RETCODE_INVALID_TRADE (10006) - ордер не найден или уже исполнен
-        • TRADE_RETCODE_TRADE_DISABLED (10019) - торговля отключена на счете
-
+    def cancel_order(self, order_id: int) -> dict[str, Any]:
+        """Cancel (remove) active pending order.
+        
         Args:
-            order_id: Ticket отложенного ордера для отмены (целое число)
-
+            order_id: Order ticket to cancel
+            
         Returns:
-            Dict с результатом:
-            {
-                "success": bool,           # True если отмена успешна
-                "ticket": int,             # Ticket отмененного ордера
-                "retcode": int,            # Код результата
-                "comment": str             # Комментарий сервера
-            }
-            Returns {"success": False, ...} если ошибка подключения/валидации.
+            {"success": bool, "ticket": int, "retcode": int, "comment": str}
         """
-        self.logger.info(f"[MT5] cancel_order(order_id={order_id})")
+        # Get order info
+        orders = mt5.orders_get(ticket=order_id)
+        if orders is None or len(orders) == 0:
+            logging.error(f"[MT5] cancel_order: order {order_id} not found: {mt5.last_error()}")
+            return {"success": False, "ticket": 0, "retcode": -1, "comment": "Order not found"}
 
-        def _cancel_error(comment: str, retcode: int = -1) -> Dict[str, Any]:
-            return {"success": False, "ticket": 0, "retcode": retcode, "comment": comment}
+        order = orders[0]
 
-        err = self._ensure_connected("cancel_order", _cancel_error)
-        if err:
-            return err
+        # Build request
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": order_id,
+            "symbol": order.symbol,
+            "comment": "[TradingBot] canceled",
+        }
 
-        try:
-            # 1. Получить информацию о ордере
-            orders = mt5.orders_get(ticket=order_id)
-            if orders is None or len(orders) == 0:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] cancel_order: order {order_id} not found: {code} {msg}")
-                return _cancel_error(f"Order not found: {msg}", code)
+        # Send cancellation
+        result = mt5.order_send(request)
+        if result is None:
+            logging.error(f"[MT5] cancel_order: order_send failed: {mt5.last_error()}")
+            return {"success": False, "ticket": 0, "retcode": -1, "comment": "order_send failed"}
 
-            order = orders[0]
+        # Process result
+        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        response = {
+            "success": success,
+            "ticket": getattr(result, "order", order_id),
+            "retcode": result.retcode,
+            "comment": getattr(result, "comment", ""),
+        }
 
-            self.logger.debug(
-                f"[MT5] cancel_order: found order {order_id}: symbol={order.symbol}, state={order.state},"
-                f" price={order.price_open:.5f}"
-            )
+        if success:
+            logging.info(f"[MT5] cancel_order SUCCESS: ticket={order_id}")
+        else:
+            logging.warning(f"[MT5] cancel_order FAILED: retcode={result.retcode}, comment={response['comment']}")
 
-            # 2. Построить MqlTradeRequest
-            request = {
-                "action": mt5.TRADE_ACTION_REMOVE,  # Удаление ордера
-                "order": order_id,
-                "symbol": order.symbol,
-                "comment": "[TradingBot] canceled",
-            }
+        return response
 
-            self.logger.debug(f"[MT5] cancel_order: sending request: {request}")
 
-            # 3. Отправить запрос на отмену
-            result = mt5.order_send(request)
-
-            if result is None:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] cancel_order: order_send returned None: {code} {msg}")
-                return _cancel_error(f"order_send failed: {msg}", code)
-
-            # 4. Обработать результат
-            retcode = result.retcode
-            success = retcode == mt5.TRADE_RETCODE_DONE
-
-            response = {
-                "success": success,
-                "ticket": result.order if hasattr(result, "order") else order_id,
-                "retcode": retcode,
-                "comment": result.comment if hasattr(result, "comment") else "",
-            }
-
-            if success:
-                self.logger.info(f"[MT5] cancel_order: SUCCESS! Order {order_id} canceled")
-            else:
-                self.logger.warning(f"[MT5] cancel_order: FAILED! Retcode={retcode}, Comment={response['comment']}")
-
-            return response
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] cancel_order: exception: {e}")
-            return _cancel_error(f"Exception: {str(e)}")
-
-    def close_position(self, position_id: str, lots: Optional[float] = None) -> str:
+    def close_position(self, position_id: str, lots: float | None = None) -> str:
         """Закрытие позиции полностью или частично. Возвращает deal_id.
 
         TODO: Реализовать метод закрытия открытой позиции через TRADE_ACTION_DEAL.
         Требуется: получение информации о позиции, расчет объема, выставление market order.
         """
-        self.logger.info(f"[MT5] close_position(position_id={position_id}, lots={lots})")
+        logging.info(f"[MT5] close_position(position_id={position_id}, lots={lots})")
         return "deal_0001"
 
-    def get_positions(self) -> List[Dict[str, Any]]:
+
+    def get_positions(self) -> list[dict[str, Any]]:
         """Получение списка открытых позиций.
 
         TODO: Реализовать метод получения активных позиций через mt5.positions_get().
         Требуется: парсинг структуры TradePosition, преобразование в словари.
         """
-        self.logger.debug("[MT5] get_positions()")
+        logging.debug("[MT5] get_positions()")
         return []
 
-    def get_orders(self) -> List[Dict[str, Any]]:
-        """Получение списка всех активных (отложенных) ордеров.
 
-        ═══════════════════════════════════════════════════════════════════════════
-        MT5 ORDERS_GET SPECIFICATION
-        ═══════════════════════════════════════════════════════════════════════════
-
-        Возвращает список АКТИВНЫХ ОТЛОЖЕННЫХ ордеров (заявок) на счете.
-        Это НЕ включает уже ИСПОЛНЕННЫЕ сделки (использовать get_history() для них).
-
-        ОТЛОЖЕННЫЕ ОРДЕРА (PENDING ORDERS):
-        ──────────────────────────────────
-        • ORDER_TYPE_BUY_LIMIT   - Лимит покупка ниже текущей цены
-        • ORDER_TYPE_SELL_LIMIT  - Лимит продажа выше текущей цены
-        • ORDER_TYPE_BUY_STOP    - Стоп покупка выше текущей цены
-        • ORDER_TYPE_SELL_STOP   - Стоп продажа ниже текущей цены
-
-        ИНФОРМАЦИЯ В ОРДЕРЕ:
-        ───────────────────
-        • ticket: Уникальный номер ордера
-        • symbol: Наименование инструмента
-        • type: Тип ордера (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP)
-        • state: Состояние (ORDER_STATE_PLACED - активный)
-        • volume: Объем в лотах
-        • price_open: Цена триггера (когда сработает)
-        • sl: Цена Stop Loss
-        • tp: Цена Take Profit
-        • time_setup: Время создания ордера
-        • time_setup_msc: Время создания (миллисекунды)
-        • time_expiration: Время истечения (если установлено)
-        • comment: Комментарий
-        • magic: ID советника
-        • reason: Причина создания
-
-        ОТЛИЧИЯ ОТ ПОЗИЦИЙ:
-        ──────────────────
-        • get_orders() → АКТИВНЫЕ ОТЛОЖЕННЫЕ ОРДЕРА (заявки в очереди)
-        • get_positions() → ОТКРЫТЫЕ ПОЗИЦИИ (уже исполненные сделки)
-        • get_history() → ИСТОРИЧЕСКИЕ СДЕЛКИ (закрытые позиции + исполненные ордера)
-
+    def get_orders(self) -> list[dict[str, Any]]:
+        """Get list of all active pending orders.
+        
+        Returns list of pending orders (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP).
+        Does NOT include executed deals - use get_history() for that.
+        
         Returns:
-            List[Dict] со списком активных ордеров. Каждый ордер содержит:
-            [
-                {
-                    "ticket": int,              # Уникальный ID ордера
-                    "symbol": str,              # Символ (EURUSD, GBPUSD и т.д.)
-                    "type": str,                # Тип (buy_limit, sell_limit, buy_stop, sell_stop)
-                    "state": str,               # Состояние (placed, request_add, request_modify, etc.)
-                    "volume": float,            # Объем в лотах
-                    "price": float,             # Цена триггера
-                    "sl": float,                # Stop Loss цена
-                    "tp": float,                # Take Profit цена
-                    "time_setup": datetime,     # Время создания
-                    "comment": str,             # Комментарий
-                    "magic": int                # ID советника
-                },
-                ...
-            ]
-            Returns [] (пустой список) если нет активных ордеров или ошибка подключения.
+            [{"ticket": int, "symbol": str, "type": str, "volume": float,
+              "price": float, "sl": float, "tp": float, "time_setup": datetime,
+              "comment": str, "magic": int}, ...]
+            Empty list if no orders or error.
         """
-        self.logger.debug("[MT5] get_orders()")
-
-        if not self.is_connected():
-            self.logger.warning("[MT5] get_orders: not connected")
+        orders = mt5.orders_get()
+        
+        if orders is None:
+            logging.error(f"[MT5] get_orders failed: {mt5.last_error()}")
             return []
-
-        try:
-            # Получить все активные ордера
-            orders = mt5.orders_get()
-
-            if orders is None or len(orders) == 0:
-                self.logger.debug("[MT5] get_orders: no active orders found")
-                return []
-
-            # Конвертировать в список дictionarios
-            result = []
-            type_names = {
-                mt5.ORDER_TYPE_BUY_LIMIT: "buy_limit",
-                mt5.ORDER_TYPE_SELL_LIMIT: "sell_limit",
-                mt5.ORDER_TYPE_BUY_STOP: "buy_stop",
-                mt5.ORDER_TYPE_SELL_STOP: "sell_stop",
-            }
-
-            for order in orders:
-                # Попробуем получить объем из разных возможных полей
-                volume = getattr(order, "volume_initial", getattr(order, "volume", 0.0))
-
-                order_dict = {
-                    "ticket": order.ticket,
-                    "symbol": order.symbol,
-                    "type": type_names.get(order.type, f"unknown_{order.type}"),
-                    "state": str(order.state),
-                    "volume": volume,
-                    "price": order.price_open,
-                    "sl": order.sl,
-                    "tp": order.tp,
-                    "time_setup": datetime.fromtimestamp(order.time_setup),
-                    "comment": order.comment if hasattr(order, "comment") else "",
-                    "magic": order.magic if hasattr(order, "magic") else 0,
-                }
-                result.append(order_dict)
-
-            self.logger.debug(f"[MT5] get_orders: found {len(result)} active orders")
-            for order in result:
-                self.logger.debug(
-                    f"[MT5]   Ticket {order['ticket']}: {order['symbol']} {order['type']} @"
-                    f" {order['price']:.5f} vol={order['volume']}"
-                )
-
-            return result
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] get_orders: exception: {e}")
+        
+        if len(orders) == 0:
             return []
+        
+        # Map order types to readable names
+        type_names = {
+            mt5.ORDER_TYPE_BUY_LIMIT: "buy_limit",
+            mt5.ORDER_TYPE_SELL_LIMIT: "sell_limit",
+            mt5.ORDER_TYPE_BUY_STOP: "buy_stop",
+            mt5.ORDER_TYPE_SELL_STOP: "sell_stop",
+        }
+        
+        result = []
+        for order in orders:
+            result.append({
+                "ticket": order.ticket,
+                "symbol": order.symbol,
+                "type": type_names.get(order.type, f"unknown_{order.type}"),
+                "volume": getattr(order, "volume_initial", 0.0),
+                "price": order.price_open,
+                "sl": order.sl,
+                "tp": order.tp,
+                "time_setup": datetime.fromtimestamp(order.time_setup),
+                "comment": getattr(order, "comment", ""),
+                "magic": getattr(order, "magic", 0),
+            })
+        
+        return result
 
-    def get_history(self, since: Optional[str] = None, until: Optional[str] = None) -> List[Dict[str, Any]]:
+
+    def get_history(self, since: str | None = None, until: str | None = None) -> list[dict[str, Any]]:
         """Получение истории сделок/ордеров за указанный период.
 
         TODO: Реализовать метод получения истории сделок через mt5.history_deals_get().
         Требуется: парсинг дат (since/until), фильтрация по периоду, преобразование в словари.
         """
-        self.logger.debug(f"[MT5] get_history(since={since}, until={until})")
+        logging.debug(f"[MT5] get_history(since={since}, until={until})")
         return []
 
-    def get_portfolio(self) -> Dict[str, Any]:
+
+    def get_portfolio(self) -> dict[str, Any]:
         """Получение метрик портфеля: баланс/эквити/маржа.
 
         TODO: Реализовать метод получения портфельных метрик через mt5.account_info().
         Требуется: расчет свободной маржи, уровня маржи, других показателей риска.
         """
-        self.logger.debug("[MT5] get_portfolio()")
+        logging.debug("[MT5] get_portfolio()")
         return {"balance": 0.0, "equity": 0.0, "margin": 0.0, "free_margin": 0.0}
 
-    def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
+
+    def get_symbol_info(self, symbol: str) -> dict[str, Any]:
         """Получение параметров символа для торговли.
 
         Необходим для:
@@ -981,24 +470,17 @@ class MetaTraderClient:
             }
             Returns empty dict if symbol not available.
         """
-        self.logger.debug(f"[MT5] get_symbol_info(symbol={symbol})")
-
-        if not self.is_connected():
-            self.logger.warning("[MT5] get_symbol_info: not connected")
-            return {}
-
         try:
             # Get symbol info from MT5
             si = mt5.symbol_info(symbol)
             if si is None:
-                code, msg = self.last_error()
-                self.logger.error(f"[MT5] get_symbol_info: symbol_info failed: {code} {msg}")
+                logging.error(f"[MT5] get_symbol_info failed: {mt5.last_error()}")
                 return {}
 
             # Get current tick for bid/ask
             tick = mt5.symbol_info_tick(symbol)
             if tick is None:
-                self.logger.debug(f"[MT5] get_symbol_info: could not get tick for {symbol}")
+                logging.debug(f"[MT5] get_symbol_info: could not get tick for {symbol}")
                 bid, ask = None, None
             else:
                 bid = tick.bid
@@ -1019,120 +501,68 @@ class MetaTraderClient:
                 "bid": bid,
             }
 
-            self.logger.debug(
+            logging.debug(
                 f"[MT5] get_symbol_info: {symbol} contract_size={si.trade_contract_size} min_lot={si.volume_min}"
             )
             return result
 
         except Exception as e:
-            self.logger.exception(f"[MT5] get_symbol_info: exception: {e}")
+            logging.exception(f"[MT5] get_symbol_info: exception: {e}")
             return {}
 
+
     def eur_to_lots(self, amount_eur: float, symbol: str) -> float:
-        """Конвертирует сумму в евро в объем в лотах для заданного символа.
-
-        Алгоритм:
-        1. Получить текущий курс EUR/USD через get_tick("EURUSD")
-        2. Конвертировать EUR → USD: amount_usd = amount_eur * eur_usd_rate
-        3. Получить contract_size символа через get_symbol_info()
-        4. Рассчитать лоты: lots = amount_usd / contract_size
-
-        Args:
-            amount_eur: Сумма в евро (например, 1000 евро).
-            symbol: Trading symbol (e.g., "EURUSD", "EURGBP").
-
-        Returns:
-            Volume in lots (float), rounded to lot_step.
-            Returns 0 if conversion fails.
+        """Convert EUR amount to lots for symbol.
+        
+        Returns 0 if conversion fails.
         """
-        self.logger.debug(f"[MT5] eur_to_lots(amount_eur={amount_eur}, symbol={symbol})")
-
-        try:
-            # Get current EUR/USD rate
-            eurusd_tick = self.get_tick("EURUSD")
-            if not eurusd_tick:
-                self.logger.error("[MT5] eur_to_lots: could not get EURUSD rate")
-                return 0.0
-
-            eur_usd_rate = eurusd_tick["bid"]  # Use bid for selling EUR
-            amount_usd = amount_eur * eur_usd_rate
-            self.logger.debug(f"[MT5] eur_to_lots: {amount_eur} EUR × {eur_usd_rate:.5f} = {amount_usd:.2f} USD")
-
-            # Get symbol info
-            sym_info = self.get_symbol_info(symbol)
-            if not sym_info:
-                self.logger.error(f"[MT5] eur_to_lots: could not get info for {symbol}")
-                return 0.0
-
-            contract_size = sym_info["contract_size"]
-            lot_step = sym_info["lot_step"]
-            min_lot = sym_info["min_lot"]
-
-            # Calculate lots
-            lots = amount_usd / contract_size
-
-            # Round to lot_step with Decimal to avoid FP errors
-            lots = self._round_to_step(lots, lot_step)
-
-            if lots < min_lot:
-                self.logger.warning(f"[MT5] eur_to_lots: calculated {lots} is below min_lot {min_lot}")
-                return 0.0
-
-            self.logger.debug(f"[MT5] eur_to_lots: result = {lots} lots")
-            return lots
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] eur_to_lots: exception: {e}")
+        # Get EUR/USD rate
+        eurusd_tick = self.get_tick("EURUSD")
+        if not eurusd_tick:
+            logging.error("[MT5] eur_to_lots: could not get EURUSD rate")
             return 0.0
+
+        # Convert EUR to USD
+        amount_usd = amount_eur * eurusd_tick["bid"]
+
+        # Get symbol info
+        sym_info = self.get_symbol_info(symbol)
+        if not sym_info:
+            logging.error(f"[MT5] eur_to_lots: could not get info for {symbol}")
+            return 0.0
+
+        # Calculate and round lots
+        lots = amount_usd / sym_info["contract_size"]
+        lots = self._round_to_step(lots, sym_info["lot_step"])
+
+        if lots < sym_info["min_lot"]:
+            logging.warning(f"[MT5] eur_to_lots: {lots} below min_lot {sym_info['min_lot']}")
+            return 0.0
+
+        return lots
+
 
     def usd_to_lots(self, amount_usd: float, symbol: str) -> float:
-        """Конвертирует сумму в долларах США в объем в лотах для заданного символа.
-
-        Алгоритм:
-        1. Получить contract_size символа через get_symbol_info()
-        2. Рассчитать лоты: lots = amount_usd / contract_size
-        3. Округлить до lot_step и проверить min_lot
-
-        Args:
-            amount_usd: Сумма в долларах (например, 10000 USD).
-            symbol: Trading symbol (e.g., "EURUSD").
-
-        Returns:
-            Volume in lots (float), rounded to lot_step.
-            Returns 0 if conversion fails.
+        """Convert USD amount to lots for symbol.
+        
+        Returns 0 if conversion fails.
         """
-        self.logger.debug(f"[MT5] usd_to_lots(amount_usd={amount_usd}, symbol={symbol})")
-
-        try:
-            # Get symbol info
-            sym_info = self.get_symbol_info(symbol)
-            if not sym_info:
-                self.logger.error(f"[MT5] usd_to_lots: could not get info for {symbol}")
-                return 0.0
-
-            contract_size = sym_info["contract_size"]
-            lot_step = sym_info["lot_step"]
-            min_lot = sym_info["min_lot"]
-
-            # Calculate lots
-            lots = amount_usd / contract_size
-            self.logger.debug(
-                f"[MT5] usd_to_lots: {amount_usd} USD / {contract_size} = {lots:.4f} lots (before rounding)"
-            )
-
-            # Round to lot_step with Decimal to avoid FP errors
-            lots = self._round_to_step(lots, lot_step)
-
-            if lots < min_lot:
-                self.logger.warning(f"[MT5] usd_to_lots: calculated {lots} is below min_lot {min_lot}")
-                return 0.0
-
-            self.logger.debug(f"[MT5] usd_to_lots: result = {lots} lots")
-            return lots
-
-        except Exception as e:
-            self.logger.exception(f"[MT5] usd_to_lots: exception: {e}")
+        # Get symbol info
+        sym_info = self.get_symbol_info(symbol)
+        if not sym_info:
+            logging.error(f"[MT5] usd_to_lots: could not get info for {symbol}")
             return 0.0
+
+        # Calculate and round lots
+        lots = amount_usd / sym_info["contract_size"]
+        lots = self._round_to_step(lots, sym_info["lot_step"])
+
+        if lots < sym_info["min_lot"]:
+            logging.warning(f"[MT5] usd_to_lots: {lots} below min_lot {sym_info['min_lot']}")
+            return 0.0
+
+        return lots
+
 
     def _round_to_step(self, value: float, step: float) -> float:
         """Round value to closest multiple of step using Decimal."""

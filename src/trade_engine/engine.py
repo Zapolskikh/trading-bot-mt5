@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import Optional
 from datetime import datetime
+import logging
 
 from common.config import load_config
 from common.types import Signal
@@ -24,9 +24,9 @@ class TradeEngine:
         self.config = load_config(config_path)
         mt_cfg = self.config.get("metatrader", {})
         self.mt = MetaTraderClient(
-            login=mt_cfg.get("login"),
-            password=mt_cfg.get("password"),
-            server=mt_cfg.get("server"),
+            login=mt_cfg["login"],
+            password=mt_cfg["password"],
+            server=mt_cfg["server"],
         )
         risk_cfg = self.config.get("risk", {})
         self.risk = RiskManager(
@@ -44,8 +44,13 @@ class TradeEngine:
         telegram_cfg = self.config.get("telegram", {})
         self.alerts = AlertService(enabled=telegram_cfg.get("enabled", True))
 
-    def start(self):
-        self.mt.connect()
+    def start(self) -> bool:
+        """Connect to MT5. Returns True if successful."""
+        if not self.mt.connect():
+            logging.error("[Engine] Failed to connect to MT5")
+            return False
+        logging.info("[Engine] Connected to MT5")
+        return True
 
     def poll_and_trade(self):
         """
@@ -66,11 +71,10 @@ class TradeEngine:
                 timeframe=self.config["app"]["base_timeframe"],
                 window=self.config["app"]["data_window"],
                 barsize=self.config["app"]["barsize"],
-                period=0,
             )
             df = self.strategy.compute_indicators(df, self.config.get("strategy", {}))
 
-            sig: Optional[Signal] = self.strategy.entry(symbol, df)
+            sig: Signal | None = self.strategy.entry(symbol, df)
             if sig:
                 # TODO: вычислить стоп в пипах и pip_value_per_lot из symbol_info
                 stop_distance_pips = 10.0
