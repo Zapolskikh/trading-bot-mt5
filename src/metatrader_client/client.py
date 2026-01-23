@@ -29,15 +29,14 @@ class MetaTraderClient:
         "W1": mt5.TIMEFRAME_W1,
         "MN1": mt5.TIMEFRAME_MN1,
     }
-    
+
     # Max price slippage for market orders in points (10 points = 1 pip for 5-digit quotes)
     # TODO: Move to config file (config.yaml or risk_manager settings)
     DEVIATION = 10
-    
+
     # EA identifier for MT5 (filters bot orders from manual/other bots)
     # TODO: Move to config file (config.yaml)
     MAGIC_NUMBER = 234567
-
 
     def __init__(self, login: int, password: str, server: str):
         """Initialize MT5 client."""
@@ -45,17 +44,20 @@ class MetaTraderClient:
         self.password = password
         self.server = server
 
-
-    def connect(self, portable: bool = True) -> bool:
+    def connect(self, path: str = "", portable: bool = True) -> bool:
         """Connect to the MT5 terminal."""
         try:
-            if not mt5.initialize(self.login, self.password, self.server, portable=portable):
-                logging.error(f"[MT5] initialize failed: {mt5.last_error()}")
-                return False
-
-            if not mt5.login(self.login, self.password, self.server):
-                logging.error(f"[MT5] login failed: {mt5.last_error()}")
-                return False
+            # Initialize MT5 terminal (path empty = auto-detect installed terminal)
+            if path:
+                if not mt5.initialize(
+                    path=path, login=self.login, password=self.password, server=self.server, portable=portable
+                ):
+                    logging.error(f"[MT5] initialize failed: {mt5.last_error()}")
+                    return False
+            else:
+                if not mt5.initialize(login=self.login, password=self.password, server=self.server, portable=portable):
+                    logging.error(f"[MT5] initialize failed: {mt5.last_error()}")
+                    return False
 
             logging.info(f"[MT5] connected: login={self.login} server={self.server}")
             return True
@@ -63,11 +65,9 @@ class MetaTraderClient:
             logging.exception("[MT5] connect failed")
             return False
 
-
     def disconnect(self):
         """Disconnect from the MT5 terminal."""
         mt5.shutdown()
-
 
     def get_market_data(self, symbol: str, timeframe: str, window: int) -> pd.DataFrame:
         """Fetch OHLCV bars as pandas DataFrame indexed by time."""
@@ -75,7 +75,7 @@ class MetaTraderClient:
             logging.error(f"[MT5] get_market_data: unsupported timeframe {timeframe}")
             return pd.DataFrame()
 
-        # bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. 
+        # bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns.
         # None in case of an error.
         rates = mt5.copy_rates_from_pos(symbol, self.TIMEFRAMES[timeframe], 0, window)
 
@@ -90,18 +90,17 @@ class MetaTraderClient:
 
         return df
 
-
     def get_tick(self, symbol: str) -> dict[str, Any]:
         """Get last tick for symbol with bid/ask/last prices and volume.
-        
+
         Returns empty dict if symbol not available.
         """
         tick = mt5.symbol_info_tick(symbol)
-        
+
         if tick is None:
             logging.error(f"[MT5] get_tick failed: {mt5.last_error()}")
             return {}
-        
+
         return {
             "time": datetime.fromtimestamp(tick.time),
             "bid": tick.bid,
@@ -110,7 +109,6 @@ class MetaTraderClient:
             "volume": tick.volume,
             "spread": tick.ask - tick.bid,
         }
-
 
     def place_order(
         self,
@@ -124,7 +122,7 @@ class MetaTraderClient:
         volume_currency: str = "lots",
     ) -> dict[str, Any]:
         """Send trading order to MT5.
-        
+
         Args:
             symbol: Trading pair (EURUSD, GBPUSD, etc.)
             side: "buy" or "sell"
@@ -134,9 +132,9 @@ class MetaTraderClient:
             order_type: "market", "limit", or "stop"
             price: Price for limit/stop orders
             volume_currency: "lots" (default), "usd", or "eur"
-            
+
         Returns:
-            {"success": bool, "ticket": int, "volume": float, "price": float, 
+            {"success": bool, "ticket": int, "volume": float, "price": float,
              "comment": str, "retcode": int, "action": str}
         """
         # Convert volume if needed
@@ -144,20 +142,34 @@ class MetaTraderClient:
         if volume_currency.lower() == "usd":
             actual_volume = self.usd_to_lots(volume, symbol)
             if actual_volume == 0:
-                logging.error(f"[MT5] place_order: USD→lots conversion failed")
-                return {"success": False, "ticket": 0, "volume": 0, "price": 0,
-                        "comment": "USD to lots conversion failed", "retcode": -1, "action": "none"}
+                logging.error("[MT5] place_order: USD→lots conversion failed")
+                return {
+                    "success": False,
+                    "ticket": 0,
+                    "volume": 0,
+                    "price": 0,
+                    "comment": "USD to lots conversion failed",
+                    "retcode": -1,
+                    "action": "none",
+                }
         elif volume_currency.lower() == "eur":
             actual_volume = self.eur_to_lots(volume, symbol)
             if actual_volume == 0:
-                logging.error(f"[MT5] place_order: EUR→lots conversion failed")
-                return {"success": False, "ticket": 0, "volume": 0, "price": 0,
-                        "comment": "EUR to lots conversion failed", "retcode": -1, "action": "none"}
+                logging.error("[MT5] place_order: EUR→lots conversion failed")
+                return {
+                    "success": False,
+                    "ticket": 0,
+                    "volume": 0,
+                    "price": 0,
+                    "comment": "EUR to lots conversion failed",
+                    "retcode": -1,
+                    "action": "none",
+                }
 
         # Determine order configuration
         side_lower = side.lower()
         type_lower = order_type.lower()
-        
+
         # Map (side, type) -> (action, order_type, requires_price)
         order_config = {
             ("buy", "market"): (mt5.TRADE_ACTION_DEAL, mt5.ORDER_TYPE_BUY, False),
@@ -167,17 +179,31 @@ class MetaTraderClient:
             ("buy", "stop"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_BUY_STOP, True),
             ("sell", "stop"): (mt5.TRADE_ACTION_PENDING, mt5.ORDER_TYPE_SELL_STOP, True),
         }.get((side_lower, type_lower))
-        
+
         if not order_config:  # Invalid side/type combination from user input
             logging.error(f"[MT5] place_order: invalid side/type: {side}/{order_type}")
-            return {"success": False, "ticket": 0, "volume": 0, "price": 0,
-                    "comment": f"Invalid side/type: {side}/{order_type}", "retcode": -1, "action": "none"}
-        
+            return {
+                "success": False,
+                "ticket": 0,
+                "volume": 0,
+                "price": 0,
+                "comment": f"Invalid side/type: {side}/{order_type}",
+                "retcode": -1,
+                "action": "none",
+            }
+
         order_action, order_type_const, requires_price = order_config
         if requires_price and price is None:  # limit/stop require price
             logging.error("[MT5] place_order: price required for limit/stop")
-            return {"success": False, "ticket": 0, "volume": 0, "price": 0,
-                    "comment": "Price is required for limit/stop orders", "retcode": -1, "action": "none"}
+            return {
+                "success": False,
+                "ticket": 0,
+                "volume": 0,
+                "price": 0,
+                "comment": "Price is required for limit/stop orders",
+                "retcode": -1,
+                "action": "none",
+            }
 
         # Build request
         request = {
@@ -193,7 +219,7 @@ class MetaTraderClient:
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_FOK if type_lower == "market" else mt5.ORDER_FILLING_IOC,
         }
-        
+
         if type_lower == "market":
             request["deviation"] = self.DEVIATION
 
@@ -201,8 +227,15 @@ class MetaTraderClient:
         result = mt5.order_send(request)
         if result is None:
             logging.error(f"[MT5] place_order: order_send failed: {mt5.last_error()}")
-            return {"success": False, "ticket": 0, "volume": 0, "price": 0,
-                    "comment": "order_send failed", "retcode": -1, "action": "none"}
+            return {
+                "success": False,
+                "ticket": 0,
+                "volume": 0,
+                "price": 0,
+                "comment": "order_send failed",
+                "retcode": -1,
+                "action": "none",
+            }
 
         # Process result
         success = result.retcode == mt5.TRADE_RETCODE_DONE
@@ -217,12 +250,14 @@ class MetaTraderClient:
         }
 
         if success:
-            logging.info(f"[MT5] place_order SUCCESS: ticket={response['ticket']}, vol={response['volume']}, price={response['price']}")
+            logging.info(
+                f"[MT5] place_order SUCCESS: ticket={response['ticket']}, vol={response['volume']},"
+                f" price={response['price']}"
+            )
         else:
             logging.warning(f"[MT5] place_order FAILED: retcode={result.retcode}, comment={response['comment']}")
 
         return response
-
 
     def modify_order(
         self,
@@ -232,13 +267,13 @@ class MetaTraderClient:
         price: float | None = None,
     ) -> dict[str, Any]:
         """Modify existing pending order (SL/TP/price).
-        
+
         Args:
             order_id: Order ticket to modify
             sl: New Stop Loss price
             tp: New Take Profit price
             price: New trigger price for limit/stop orders
-            
+
         Returns:
             {"success": bool, "ticket": int, "retcode": int, "comment": str,
              "old_values": dict, "new_values": dict}
@@ -247,11 +282,17 @@ class MetaTraderClient:
         orders = mt5.orders_get(ticket=order_id)
         if orders is None or len(orders) == 0:
             logging.error(f"[MT5] modify_order: order {order_id} not found: {mt5.last_error()}")
-            return {"success": False, "ticket": 0, "retcode": -1, "comment": "Order not found",
-                    "old_values": {}, "new_values": {}}
+            return {
+                "success": False,
+                "ticket": 0,
+                "retcode": -1,
+                "comment": "Order not found",
+                "old_values": {},
+                "new_values": {},
+            }
 
         order = orders[0]
-        
+
         # Save old values
         old_values = {
             "price": getattr(order, "price_open", 0.0),
@@ -277,8 +318,14 @@ class MetaTraderClient:
         result = mt5.order_send(request)
         if result is None:
             logging.error(f"[MT5] modify_order: order_send failed: {mt5.last_error()}")
-            return {"success": False, "ticket": 0, "retcode": -1, "comment": "order_send failed",
-                    "old_values": old_values, "new_values": {}}
+            return {
+                "success": False,
+                "ticket": 0,
+                "retcode": -1,
+                "comment": "order_send failed",
+                "old_values": old_values,
+                "new_values": {},
+            }
 
         # Process result
         success = result.retcode == mt5.TRADE_RETCODE_DONE
@@ -298,19 +345,22 @@ class MetaTraderClient:
         }
 
         if success:
-            logging.info(f"[MT5] modify_order SUCCESS: ticket={order_id}, price={old_values['price']:.5f}→{new_values['price']:.5f}, sl={old_values['sl']:.5f}→{new_values['sl']:.5f}, tp={old_values['tp']:.5f}→{new_values['tp']:.5f}")
+            logging.info(
+                f"[MT5] modify_order SUCCESS: ticket={order_id},"
+                f" price={old_values['price']:.5f}→{new_values['price']:.5f},"
+                f" sl={old_values['sl']:.5f}→{new_values['sl']:.5f}, tp={old_values['tp']:.5f}→{new_values['tp']:.5f}"
+            )
         else:
             logging.warning(f"[MT5] modify_order FAILED: retcode={result.retcode}, comment={response['comment']}")
 
         return response
 
-
     def cancel_order(self, order_id: int) -> dict[str, Any]:
         """Cancel (remove) active pending order.
-        
+
         Args:
             order_id: Order ticket to cancel
-            
+
         Returns:
             {"success": bool, "ticket": int, "retcode": int, "comment": str}
         """
@@ -352,7 +402,6 @@ class MetaTraderClient:
 
         return response
 
-
     def close_position(self, position_id: str, lots: float | None = None) -> str:
         """Закрытие позиции полностью или частично. Возвращает deal_id.
 
@@ -361,7 +410,6 @@ class MetaTraderClient:
         """
         logging.info(f"[MT5] close_position(position_id={position_id}, lots={lots})")
         return "deal_0001"
-
 
     def get_positions(self) -> list[dict[str, Any]]:
         """Получение списка открытых позиций.
@@ -372,13 +420,12 @@ class MetaTraderClient:
         logging.debug("[MT5] get_positions()")
         return []
 
-
     def get_orders(self) -> list[dict[str, Any]]:
         """Get list of all active pending orders.
-        
+
         Returns list of pending orders (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP).
         Does NOT include executed deals - use get_history() for that.
-        
+
         Returns:
             [{"ticket": int, "symbol": str, "type": str, "volume": float,
               "price": float, "sl": float, "tp": float, "time_setup": datetime,
@@ -386,14 +433,14 @@ class MetaTraderClient:
             Empty list if no orders or error.
         """
         orders = mt5.orders_get()
-        
+
         if orders is None:
             logging.error(f"[MT5] get_orders failed: {mt5.last_error()}")
             return []
-        
+
         if len(orders) == 0:
             return []
-        
+
         # Map order types to readable names
         type_names = {
             mt5.ORDER_TYPE_BUY_LIMIT: "buy_limit",
@@ -401,24 +448,25 @@ class MetaTraderClient:
             mt5.ORDER_TYPE_BUY_STOP: "buy_stop",
             mt5.ORDER_TYPE_SELL_STOP: "sell_stop",
         }
-        
+
         result = []
         for order in orders:
-            result.append({
-                "ticket": order.ticket,
-                "symbol": order.symbol,
-                "type": type_names.get(order.type, f"unknown_{order.type}"),
-                "volume": getattr(order, "volume_initial", 0.0),
-                "price": order.price_open,
-                "sl": order.sl,
-                "tp": order.tp,
-                "time_setup": datetime.fromtimestamp(order.time_setup),
-                "comment": getattr(order, "comment", ""),
-                "magic": getattr(order, "magic", 0),
-            })
-        
-        return result
+            result.append(
+                {
+                    "ticket": order.ticket,
+                    "symbol": order.symbol,
+                    "type": type_names.get(order.type, f"unknown_{order.type}"),
+                    "volume": getattr(order, "volume_initial", 0.0),
+                    "price": order.price_open,
+                    "sl": order.sl,
+                    "tp": order.tp,
+                    "time_setup": datetime.fromtimestamp(order.time_setup),
+                    "comment": getattr(order, "comment", ""),
+                    "magic": getattr(order, "magic", 0),
+                }
+            )
 
+        return result
 
     def get_history(self, since: str | None = None, until: str | None = None) -> list[dict[str, Any]]:
         """Получение истории сделок/ордеров за указанный период.
@@ -429,7 +477,6 @@ class MetaTraderClient:
         logging.debug(f"[MT5] get_history(since={since}, until={until})")
         return []
 
-
     def get_portfolio(self) -> dict[str, Any]:
         """Получение метрик портфеля: баланс/эквити/маржа.
 
@@ -438,7 +485,6 @@ class MetaTraderClient:
         """
         logging.debug("[MT5] get_portfolio()")
         return {"balance": 0.0, "equity": 0.0, "margin": 0.0, "free_margin": 0.0}
-
 
     def get_symbol_info(self, symbol: str) -> dict[str, Any]:
         """Получение параметров символа для торговли.
@@ -510,10 +556,9 @@ class MetaTraderClient:
             logging.exception(f"[MT5] get_symbol_info: exception: {e}")
             return {}
 
-
     def eur_to_lots(self, amount_eur: float, symbol: str) -> float:
         """Convert EUR amount to lots for symbol.
-        
+
         Returns 0 if conversion fails.
         """
         # Get EUR/USD rate
@@ -541,10 +586,9 @@ class MetaTraderClient:
 
         return lots
 
-
     def usd_to_lots(self, amount_usd: float, symbol: str) -> float:
         """Convert USD amount to lots for symbol.
-        
+
         Returns 0 if conversion fails.
         """
         # Get symbol info
@@ -562,7 +606,6 @@ class MetaTraderClient:
             return 0.0
 
         return lots
-
 
     def _round_to_step(self, value: float, step: float) -> float:
         """Round value to closest multiple of step using Decimal."""

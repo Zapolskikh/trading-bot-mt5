@@ -57,7 +57,7 @@ def test_mt5_connection_workflow(mt5_credentials):
     try:
         # 1. Подключение
         assert client.connect() is True
-        
+
         # Verify connection by calling get_tick (get_portfolio is TODO stub)
         tick_test = client.get_tick("EURUSD")
         assert len(tick_test) > 0, "Should be able to get tick after connect"
