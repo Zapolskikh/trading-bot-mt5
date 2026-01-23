@@ -27,15 +27,6 @@ strategy:
     atr_multiplier_sl: 1.5
     atr_multiplier_tp: 2.0
 
-metatrader:
-  terminal_path: "/path/to/terminal"
-  account_id: 123456
-  server: "Broker-Server"
-  timeout_ms: 2000
-  retry:
-    attempts: 3
-    backoff_ms: 500
-
 telegram:
   enabled: true
 
