@@ -5,6 +5,11 @@ app:
   data_window: 500
   barsize: "ask"           # "bid" | "ask" | "mid"
 
+metatrader:
+  login: "env:MT5_LOGIN"
+  password: "env:MT5_PASSWORD"
+  server: "env:MT5_SERVER"
+
 risk:
   per_trade_pct: 0.5
   per_day_pct: 2.0
@@ -14,6 +19,8 @@ risk:
 
 strategy:
   name: "MyStrategyV1"
+  timeframe: "H1"
+  symbols: ["EURUSD", "GBPUSD"]
   indicators:
     - type: "EMA"
       period: 20
