@@ -1,14 +1,13 @@
-from __future__ import annotations
-from datetime import datetime
 import logging
+from datetime import datetime
 
-from common.config import load_config
-from common.types import Signal
-from metatrader_client.client import MetaTraderClient
-from risk_manager.risk_manager import RiskManager, RiskConfig
-from strategy.strategy import Strategy
-from alert_service.telegram import AlertService
-from journal_service.csv_journal import JournalService
+from trading_bot_mt5.client import MetaTraderClient
+from trading_bot_mt5.common.config import load_config
+from trading_bot_mt5.common.types import Signal
+from trading_bot_mt5.risk_management import RiskConfig, RiskManagement
+from trading_bot_mt5.services.csv_journal import JournalService
+from trading_bot_mt5.services.tg_alerts import AlertService
+from trading_bot_mt5.strategies.strategy import Strategy
 
 
 class TradeEngine:
@@ -29,7 +28,7 @@ class TradeEngine:
             server=mt_cfg["server"],
         )
         risk_cfg = self.config.get("risk", {})
-        self.risk = RiskManager(
+        self.risk = RiskManagement(
             RiskConfig(
                 per_trade_pct=risk_cfg.get("per_trade_pct", 0.5),
                 per_day_pct=risk_cfg.get("per_day_pct", 2.0),

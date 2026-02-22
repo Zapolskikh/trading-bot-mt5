@@ -1,4 +1,3 @@
-from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict
 
@@ -12,7 +11,7 @@ class RiskConfig:
     dynamic_rules: Optional[Dict] = None
 
 
-class RiskManager:
+class RiskManagement:
     """
     Отвечает за:
     - Проверку лимитов (сделка/день/активные)

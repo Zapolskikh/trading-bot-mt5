@@ -1,8 +1,8 @@
-from risk_manager.risk_manager import RiskManager, RiskConfig
+from trading_bot_mt5.risk_management import RiskConfig, RiskManagement
 
 
 def test_can_open_trade_limits():
-    rm = RiskManager(RiskConfig(per_trade_pct=1.0, per_day_pct=2.0, max_active_trades=1))
+    rm = RiskManagement(RiskConfig(per_trade_pct=1.0, per_day_pct=2.0, max_active_trades=1))
     rm.update_equity(10000.0)
     ok, reason = rm.can_open_trade(stop_distance_pips=10, pip_value_per_lot=10)
     assert ok and reason == "ok"

@@ -16,7 +16,7 @@ check: ## Run code quality tools
 .PHONY: test
 test: ## Run unit tests
 	@echo "Run unit tests"
-	@poetry run pytest
+	@poetry run pytest -vv -s -ra --tb=long
 
 .PHONY: clean
 clean: ## Remove generated files

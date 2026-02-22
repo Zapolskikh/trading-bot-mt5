@@ -1,8 +1,9 @@
+import logging
 from typing import Any
 from datetime import datetime
-import pandas as pd
-import logging
 from decimal import Decimal, ROUND_HALF_UP
+
+import pandas as pd
 import MetaTrader5 as mt5
 
 

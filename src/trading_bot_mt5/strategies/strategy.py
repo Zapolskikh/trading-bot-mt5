@@ -1,7 +1,8 @@
-from __future__ import annotations
 from typing import Any, Dict, Optional
+
 import pandas as pd
-from common.types import Signal, ExitSignal
+
+from trading_bot_mt5.common.types import ExitSignal, Signal
 
 
 class Strategy:

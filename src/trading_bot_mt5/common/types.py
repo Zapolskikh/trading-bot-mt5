@@ -1,7 +1,5 @@
-from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Literal, Dict, Any
-
 
 Side = Literal["buy", "sell"]
 OrderType = Literal["market", "limit", "stop"]

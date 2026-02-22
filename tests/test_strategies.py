@@ -1,6 +1,5 @@
 import pandas as pd
-
-from strategy.strategy import Strategy
+from trading_bot_mt5.strategies.strategy import Strategy
 
 
 def test_compute_indicators_noop():
