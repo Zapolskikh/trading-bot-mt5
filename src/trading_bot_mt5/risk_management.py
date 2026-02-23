@@ -1,10 +1,8 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from decimal import Decimal, ROUND_HALF_UP
 import logging
-
-if TYPE_CHECKING:
-    from trading_bot_mt5.client import MetaTraderClient
+from trading_bot_mt5.client import MetaTraderClient
 
 
 @dataclass
