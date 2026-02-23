@@ -141,7 +141,7 @@ def test_calculate_position_size_below_min_lot(risk_manager):
     """Тест расчета размера позиции - ниже min_lot."""
     symbol = "EURUSD"
     entry_price = 1.10000
-    stop_price = 1.09000  # Очень большой стоп = маленький размер
+    stop_price = 1.07000  # Очень большой стоп = размер позиции ниже min_lot
     equity = 1000.0  # Маленький капитал
 
     lots = risk_manager.calculate_position_size(symbol, entry_price, stop_price, equity)
