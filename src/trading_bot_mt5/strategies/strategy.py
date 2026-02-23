@@ -3,8 +3,8 @@ import logging
 
 import pandas as pd
 
-from trading_bot_mt5.src.common.types import ExitSignal, Signal
-from src.metatrader_client.client import MetaTraderClient
+from trading_bot_mt5.common.types import ExitSignal, Signal
+from trading_bot_mt5.client import MetaTraderClient
 
 logger = logging.getLogger(__name__)
 

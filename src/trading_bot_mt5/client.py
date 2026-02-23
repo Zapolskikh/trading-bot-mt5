@@ -69,6 +69,13 @@ class MetaTraderClient:
         """Disconnect from the MT5 terminal."""
         mt5.shutdown()
 
+    def _is_success_retcode(self, retcode: int, allow_placed: bool = False) -> bool:
+        """Check whether MT5 retcode should be treated as successful."""
+        success_codes = {mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", None)}
+        if allow_placed:
+            success_codes.add(getattr(mt5, "TRADE_RETCODE_PLACED", None))
+        return retcode in success_codes
+
     def get_market_data(self, symbol: str, timeframe: str, window: int) -> pd.DataFrame:
         """Fetch OHLCV bars as pandas DataFrame indexed by time."""
         if timeframe not in self.TIMEFRAMES:
@@ -198,7 +205,7 @@ class MetaTraderClient:
             "symbol": symbol,
             "volume": float(actual_volume),
             "type": order_type_const,
-            "price": float(price) if price else 0.0,
+            "price": float(price) if price is not None else 0.0,
             "sl": float(sl) if sl else 0.0,
             "tp": float(tp) if tp else 0.0,
             "magic": self.MAGIC_NUMBER,
@@ -225,12 +232,12 @@ class MetaTraderClient:
             }
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode, allow_placed=(type_lower != "market"))
         response = {
             "success": success,
             "ticket": result.order or result.deal or 0,
             "volume": getattr(result, "volume", actual_volume),
-            "price": getattr(result, "price", price or 0.0),
+            "price": getattr(result, "price", price if price is not None else 0.0),
             "comment": getattr(result, "comment", ""),
             "retcode": result.retcode,
             "action": f"{side_lower} {type_lower}",
@@ -315,7 +322,7 @@ class MetaTraderClient:
             }
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode)
         new_values = {
             "price": price if price is not None else old_values["price"],
             "sl": sl if sl is not None else old_values["sl"],
@@ -374,7 +381,7 @@ class MetaTraderClient:
             return {"success": False, "ticket": 0, "retcode": -1, "comment": "order_send failed"}
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode)
         response = {
             "success": success,
             "ticket": getattr(result, "order", order_id),
@@ -469,7 +476,7 @@ class MetaTraderClient:
             }
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode)
         response = {
             "success": success,
             "deal": result.deal or 0,
@@ -552,7 +559,7 @@ class MetaTraderClient:
             }
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode)
         new_values = {
             "sl": sl if sl is not None else position.sl,
             "tp": tp if tp is not None else position.tp,
@@ -635,7 +642,6 @@ class MetaTraderClient:
             )
 
         return result
-
 
     def get_orders(self) -> list[dict[str, Any]]:
         """Get list of all active pending orders.

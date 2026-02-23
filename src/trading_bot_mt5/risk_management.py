@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import logging
 
 if TYPE_CHECKING:
-    from src.metatrader_client.client import MetaTraderClient
+    from trading_bot_mt5.client import MetaTraderClient
 
 
 @dataclass
@@ -23,8 +23,6 @@ class RiskConfig:
 
 
 class RiskManagement:
-    """
-class RiskManager:
     """Управление рисками для торговли.
 
     Отвечает за:
@@ -49,7 +47,7 @@ class RiskManager:
     def reset_daily_limits(self):
         """Сброс дневных лимитов (вызывать в начале каждого торгового дня)."""
         self.daily_risk_used = 0.0
-        logging.info("[RiskManager] Daily limits reset")
+        logging.info("[RiskManagement] Daily limits reset")
 
     def can_open_trade(self, equity: float) -> tuple[bool, str]:
         """Проверяет возможность открытия новой сделки.
@@ -98,21 +96,21 @@ class RiskManager:
         # Получаем информацию о символе
         symbol_info = self.mt5_client.get_symbol_info(symbol)
         if not symbol_info:
-            logging.error(f"[RiskManager] Failed to get symbol info for {symbol}")
+            logging.error(f"[RiskManagement] Failed to get symbol info for {symbol}")
             return 0.0
 
         # Рассчитываем расстояние до стопа в пипсах
         stop_distance_pips = self._calculate_stop_distance_pips(symbol_info, entry_price, stop_price)
 
         if stop_distance_pips <= 0:
-            logging.error(f"[RiskManager] Invalid stop distance: {stop_distance_pips}")
+            logging.error(f"[RiskManagement] Invalid stop distance: {stop_distance_pips}")
             return 0.0
 
         # Рассчитываем pip value для 1 лота
         pip_value = self._calculate_pip_value(symbol_info, lots=1.0)
 
         if pip_value <= 0:
-            logging.error(f"[RiskManager] Invalid pip value: {pip_value}")
+            logging.error(f"[RiskManagement] Invalid pip value: {pip_value}")
             return 0.0
 
         # Рассчитываем размер позиции: lots = risk / (stop_distance * pip_value)
@@ -123,7 +121,7 @@ class RiskManager:
         lots = self._normalize_volume(lots, symbol_info)
 
         logging.info(
-            f"[RiskManager] Position size: {lots:.2f} lots for {symbol}, "
+            f"[RiskManagement] Position size: {lots:.2f} lots for {symbol}, "
             f"risk={risk_amount:.2f}, stop_distance={stop_distance_pips:.1f} pips, "
             f"pip_value={pip_value:.2f}"
         )
@@ -140,7 +138,7 @@ class RiskManager:
         self.active_trades[trade_id] = risk_amount
         self.daily_risk_used += risk_amount
         logging.info(
-            f"[RiskManager] Trade {trade_id} opened, risk={risk_amount:.2f}, "
+            f"[RiskManagement] Trade {trade_id} opened, risk={risk_amount:.2f}, "
             f"daily_used={self.daily_risk_used:.2f}, active_trades={len(self.active_trades)}"
         )
 
@@ -152,7 +150,7 @@ class RiskManager:
         """
         risk_amount = self.active_trades.pop(trade_id, 0.0)
         logging.info(
-            f"[RiskManager] Trade {trade_id} closed, risk was {risk_amount:.2f}, "
+            f"[RiskManagement] Trade {trade_id} closed, risk was {risk_amount:.2f}, "
             f"active_trades={len(self.active_trades)}"
         )
 
@@ -224,11 +222,11 @@ class RiskManager:
 
         # Ограничиваем min/max
         if lots < min_lot:
-            logging.warning(f"[RiskManager] Volume {lots} below min_lot {min_lot}, returning 0")
+            logging.warning(f"[RiskManagement] Volume {lots} below min_lot {min_lot}, returning 0")
             return 0.0
 
         if lots > max_lot:
-            logging.warning(f"[RiskManager] Volume {lots} exceeds max_lot {max_lot}, capping to {max_lot}")
+            logging.warning(f"[RiskManagement] Volume {lots} exceeds max_lot {max_lot}, capping to {max_lot}")
             lots = max_lot
 
         return lots
