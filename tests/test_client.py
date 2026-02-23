@@ -16,7 +16,7 @@ def test_currency_to_lots_conversion(mt5_credentials):
     if not mt5_credentials.get("login"):
         pytest.skip("MT5 credentials not configured")
 
-    client = client_mod.MetaTraderClient(
+    client = MetaTraderClient(
         login=mt5_credentials.get("login"),
         password=mt5_credentials.get("password"),
         server=mt5_credentials.get("server"),
@@ -188,6 +188,7 @@ def test_mt5_connection_workflow(mt5_credentials):
         # Cleanup
         client.disconnect()
 
+
 @pytest.mark.integration
 def test_get_positions_and_portfolio(mt5_credentials):
     """Тест получения открытых позиций и данных портфеля.
@@ -201,7 +202,7 @@ def test_get_positions_and_portfolio(mt5_credentials):
     if not mt5_credentials.get("login"):
         pytest.skip("MT5 credentials not configured")
 
-    client = client_mod.MetaTraderClient(
+    client = MetaTraderClient(
         login=mt5_credentials.get("login"),
         password=mt5_credentials.get("password"),
         server=mt5_credentials.get("server"),
@@ -213,11 +214,11 @@ def test_get_positions_and_portfolio(mt5_credentials):
         # Test get_positions (all)
         all_positions = client.get_positions()
         assert isinstance(all_positions, list), "get_positions should return list"
-        
+
         # Test get_positions (filtered by symbol)
         eurusd_positions = client.get_positions(symbol="EURUSD")
         assert isinstance(eurusd_positions, list), "get_positions(symbol) should return list"
-        
+
         # If there are any EURUSD positions, verify structure
         if len(eurusd_positions) > 0:
             pos = eurusd_positions[0]
@@ -256,7 +257,7 @@ def test_get_history(mt5_credentials):
     if not mt5_credentials.get("login"):
         pytest.skip("MT5 credentials not configured")
 
-    client = client_mod.MetaTraderClient(
+    client = MetaTraderClient(
         login=mt5_credentials.get("login"),
         password=mt5_credentials.get("password"),
         server=mt5_credentials.get("server"),
@@ -268,7 +269,7 @@ def test_get_history(mt5_credentials):
         # Test get_history with default date range (30 days)
         history = client.get_history()
         assert isinstance(history, list), "get_history should return list"
-        
+
         # If there's any history, verify structure
         if len(history) > 0:
             deal = history[0]
@@ -286,9 +287,10 @@ def test_get_history(mt5_credentials):
 
         # Test get_history with custom date range
         from datetime import datetime, timedelta
+
         date_to = datetime.now()
         date_from = date_to - timedelta(days=7)
-        
+
         history_week = client.get_history(date_from=date_from, date_to=date_to)
         assert isinstance(history_week, list), "get_history with dates should return list"
 
