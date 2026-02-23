@@ -33,9 +33,8 @@ class TradeEngine:
                 per_trade_pct=risk_cfg.get("per_trade_pct", 0.5),
                 per_day_pct=risk_cfg.get("per_day_pct", 2.0),
                 max_active_trades=risk_cfg.get("max_active_trades", 4),
-                dynamic_enabled=risk_cfg.get("dynamic", {}).get("enabled", False),
-                dynamic_rules=risk_cfg.get("dynamic", {}),
-            )
+            ),
+            mt5_client=self.mt,
         )
         self.strategy = Strategy(self.config.get("strategy", {}))
         journal_cfg = self.config.get("journal", {})

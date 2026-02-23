@@ -69,6 +69,13 @@ class MetaTraderClient:
         """Disconnect from the MT5 terminal."""
         mt5.shutdown()
 
+    def _is_success_retcode(self, retcode: int, allow_placed: bool = False) -> bool:
+        """Check whether MT5 retcode should be treated as successful."""
+        success_codes = {mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", None)}
+        if allow_placed:
+            success_codes.add(getattr(mt5, "TRADE_RETCODE_PLACED", None))
+        return retcode in success_codes
+
     def get_market_data(self, symbol: str, timeframe: str, window: int) -> pd.DataFrame:
         """Fetch OHLCV bars as pandas DataFrame indexed by time."""
         if timeframe not in self.TIMEFRAMES:
@@ -139,29 +146,16 @@ class MetaTraderClient:
         """
         # Convert volume if needed
         actual_volume = volume
-        if volume_currency.lower() == "usd":
-            actual_volume = self.usd_to_lots(volume, symbol)
+        if volume_currency.lower() != "lots":
+            actual_volume = self.currency_to_lots(volume, volume_currency.upper(), symbol)
             if actual_volume == 0:
-                logging.error("[MT5] place_order: USD→lots conversion failed")
+                logging.error(f"[MT5] place_order: {volume_currency}→lots conversion failed")
                 return {
                     "success": False,
                     "ticket": 0,
                     "volume": 0,
                     "price": 0,
-                    "comment": "USD to lots conversion failed",
-                    "retcode": -1,
-                    "action": "none",
-                }
-        elif volume_currency.lower() == "eur":
-            actual_volume = self.eur_to_lots(volume, symbol)
-            if actual_volume == 0:
-                logging.error("[MT5] place_order: EUR→lots conversion failed")
-                return {
-                    "success": False,
-                    "ticket": 0,
-                    "volume": 0,
-                    "price": 0,
-                    "comment": "EUR to lots conversion failed",
+                    "comment": f"{volume_currency} to lots conversion failed",
                     "retcode": -1,
                     "action": "none",
                 }
@@ -211,7 +205,7 @@ class MetaTraderClient:
             "symbol": symbol,
             "volume": float(actual_volume),
             "type": order_type_const,
-            "price": float(price) if price else 0.0,
+            "price": float(price) if price is not None else 0.0,
             "sl": float(sl) if sl else 0.0,
             "tp": float(tp) if tp else 0.0,
             "magic": self.MAGIC_NUMBER,
@@ -238,12 +232,12 @@ class MetaTraderClient:
             }
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode, allow_placed=(type_lower != "market"))
         response = {
             "success": success,
             "ticket": result.order or result.deal or 0,
             "volume": getattr(result, "volume", actual_volume),
-            "price": getattr(result, "price", price or 0.0),
+            "price": getattr(result, "price", price if price is not None else 0.0),
             "comment": getattr(result, "comment", ""),
             "retcode": result.retcode,
             "action": f"{side_lower} {type_lower}",
@@ -328,7 +322,7 @@ class MetaTraderClient:
             }
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode)
         new_values = {
             "price": price if price is not None else old_values["price"],
             "sl": sl if sl is not None else old_values["sl"],
@@ -387,7 +381,7 @@ class MetaTraderClient:
             return {"success": False, "ticket": 0, "retcode": -1, "comment": "order_send failed"}
 
         # Process result
-        success = result.retcode == mt5.TRADE_RETCODE_DONE
+        success = self._is_success_retcode(result.retcode)
         response = {
             "success": success,
             "ticket": getattr(result, "order", order_id),
@@ -402,23 +396,252 @@ class MetaTraderClient:
 
         return response
 
-    def close_position(self, position_id: str, lots: float | None = None) -> str:
-        """Закрытие позиции полностью или частично. Возвращает deal_id.
+    def close_position(self, position_ticket: int, volume: float | None = None) -> dict[str, Any]:
+        """Close open position fully or partially.
 
-        TODO: Реализовать метод закрытия открытой позиции через TRADE_ACTION_DEAL.
-        Требуется: получение информации о позиции, расчет объема, выставление market order.
+        Args:
+            position_ticket: Position ticket to close
+            volume: Volume in lots to close. If None, closes entire position.
+
+        Returns:
+            {"success": bool, "deal": int, "volume": float, "price": float,
+             "comment": str, "retcode": int}
         """
-        logging.info(f"[MT5] close_position(position_id={position_id}, lots={lots})")
-        return "deal_0001"
+        # Get position info
+        positions = mt5.positions_get(ticket=position_ticket)
+        if positions is None or len(positions) == 0:
+            logging.error(f"[MT5] close_position: position {position_ticket} not found: {mt5.last_error()}")
+            return {
+                "success": False,
+                "deal": 0,
+                "volume": 0.0,
+                "price": 0.0,
+                "comment": "Position not found",
+                "retcode": -1,
+            }
 
-    def get_positions(self) -> list[dict[str, Any]]:
-        """Получение списка открытых позиций.
+        position = positions[0]
 
-        TODO: Реализовать метод получения активных позиций через mt5.positions_get().
-        Требуется: парсинг структуры TradePosition, преобразование в словари.
+        # Determine close volume
+        close_volume = volume if volume is not None else position.volume
+
+        # Validate volume
+        if close_volume > position.volume:
+            logging.error(
+                f"[MT5] close_position: requested volume {close_volume} exceeds position volume {position.volume}"
+            )
+            return {
+                "success": False,
+                "deal": 0,
+                "volume": 0.0,
+                "price": 0.0,
+                "comment": "Close volume exceeds position volume",
+                "retcode": -1,
+            }
+
+        # Determine opposite order type
+        if position.type == mt5.POSITION_TYPE_BUY:
+            order_type = mt5.ORDER_TYPE_SELL
+            price = mt5.symbol_info_tick(position.symbol).bid
+        else:
+            order_type = mt5.ORDER_TYPE_BUY
+            price = mt5.symbol_info_tick(position.symbol).ask
+
+        # Build close request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": position.symbol,
+            "volume": float(close_volume),
+            "type": order_type,
+            "position": position_ticket,
+            "price": float(price),
+            "deviation": self.DEVIATION,
+            "magic": self.MAGIC_NUMBER,
+            "comment": "[TradingBot] close",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_FOK,
+        }
+
+        # Send close request
+        result = mt5.order_send(request)
+        if result is None:
+            logging.error(f"[MT5] close_position: order_send failed: {mt5.last_error()}")
+            return {
+                "success": False,
+                "deal": 0,
+                "volume": 0.0,
+                "price": 0.0,
+                "comment": "order_send failed",
+                "retcode": -1,
+            }
+
+        # Process result
+        success = self._is_success_retcode(result.retcode)
+        response = {
+            "success": success,
+            "deal": result.deal or 0,
+            "volume": getattr(result, "volume", close_volume),
+            "price": getattr(result, "price", price),
+            "comment": getattr(result, "comment", ""),
+            "retcode": result.retcode,
+        }
+
+        if success:
+            logging.info(
+                f"[MT5] close_position SUCCESS: position={position_ticket}, deal={response['deal']}, "
+                f"vol={response['volume']}, price={response['price']}"
+            )
+        else:
+            logging.warning(f"[MT5] close_position FAILED: retcode={result.retcode}, comment={response['comment']}")
+
+        return response
+
+    def modify_position(
+        self,
+        position_ticket: int,
+        sl: float | None = None,
+        tp: float | None = None,
+    ) -> dict[str, Any]:
+        """Modify Stop Loss and Take Profit of an open position.
+
+        Args:
+            position_ticket: Position ticket to modify
+            sl: New Stop Loss price (None to keep current)
+            tp: New Take Profit price (None to keep current)
+
+        Returns:
+            {"success": bool, "ticket": int, "retcode": int, "comment": str,
+             "old_values": dict, "new_values": dict}
         """
-        logging.debug("[MT5] get_positions()")
-        return []
+        # Get position info
+        positions = mt5.positions_get(ticket=position_ticket)
+        if positions is None or len(positions) == 0:
+            logging.error(f"[MT5] modify_position: position {position_ticket} not found: {mt5.last_error()}")
+            return {
+                "success": False,
+                "ticket": 0,
+                "retcode": -1,
+                "comment": "Position not found",
+                "old_values": {},
+                "new_values": {},
+            }
+
+        position = positions[0]
+
+        # Save old values
+        old_values = {
+            "sl": position.sl,
+            "tp": position.tp,
+        }
+
+        # Build request
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": position.symbol,
+            "position": position_ticket,
+            "sl": float(sl) if sl is not None else position.sl,
+            "tp": float(tp) if tp is not None else position.tp,
+            "magic": self.MAGIC_NUMBER,
+            "comment": "[TradingBot] modified position",
+        }
+
+        # Send modification
+        result = mt5.order_send(request)
+        if result is None:
+            logging.error(f"[MT5] modify_position: order_send failed: {mt5.last_error()}")
+            return {
+                "success": False,
+                "ticket": 0,
+                "retcode": -1,
+                "comment": "order_send failed",
+                "old_values": old_values,
+                "new_values": {},
+            }
+
+        # Process result
+        success = self._is_success_retcode(result.retcode)
+        new_values = {
+            "sl": sl if sl is not None else position.sl,
+            "tp": tp if tp is not None else position.tp,
+        }
+
+        response = {
+            "success": success,
+            "ticket": position_ticket,
+            "retcode": result.retcode,
+            "comment": getattr(result, "comment", ""),
+            "old_values": old_values,
+            "new_values": new_values,
+        }
+
+        if success:
+            logging.info(
+                f"[MT5] modify_position SUCCESS: position={position_ticket}, "
+                f"sl={old_values['sl']:.5f}→{new_values['sl']:.5f}, "
+                f"tp={old_values['tp']:.5f}→{new_values['tp']:.5f}"
+            )
+        else:
+            logging.warning(f"[MT5] modify_position FAILED: retcode={result.retcode}, comment={response['comment']}")
+
+        return response
+
+    def get_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
+        """Get list of open positions with optional filtering by symbol.
+
+        Args:
+            symbol: Optional symbol name to filter positions (e.g., "EURUSD").
+                   If None, returns all open positions.
+
+        Returns:
+            [{"ticket": int, "time": datetime, "type": str, "symbol": str,
+              "volume": float, "price_open": float, "price_current": float,
+              "sl": float, "tp": float, "profit": float, "swap": float,
+              "commission": float, "magic": int, "identifier": int,
+              "comment": str}, ...]
+            Empty list if no positions or error.
+        """
+        # Get positions with optional symbol filter
+        if symbol:
+            positions = mt5.positions_get(symbol=symbol)
+        else:
+            positions = mt5.positions_get()
+
+        if positions is None:
+            logging.error(f"[MT5] get_positions failed: {mt5.last_error()}")
+            return []
+
+        if len(positions) == 0:
+            return []
+
+        # Map position types to readable names
+        type_names = {
+            mt5.POSITION_TYPE_BUY: "buy",
+            mt5.POSITION_TYPE_SELL: "sell",
+        }
+
+        result = []
+        for pos in positions:
+            result.append(
+                {
+                    "ticket": pos.ticket,
+                    "time": datetime.fromtimestamp(pos.time),
+                    "type": type_names.get(pos.type, f"unknown_{pos.type}"),
+                    "symbol": pos.symbol,
+                    "volume": pos.volume,
+                    "price_open": pos.price_open,
+                    "price_current": pos.price_current,
+                    "sl": pos.sl,
+                    "tp": pos.tp,
+                    "profit": pos.profit,
+                    "swap": getattr(pos, "swap", 0.0),
+                    "commission": getattr(pos, "commission", 0.0),
+                    "magic": pos.magic,
+                    "identifier": pos.identifier,
+                    "comment": getattr(pos, "comment", ""),
+                }
+            )
+
+        return result
 
     def get_orders(self) -> list[dict[str, Any]]:
         """Get list of all active pending orders.
@@ -468,23 +691,142 @@ class MetaTraderClient:
 
         return result
 
-    def get_history(self, since: str | None = None, until: str | None = None) -> list[dict[str, Any]]:
-        """Получение истории сделок/ордеров за указанный период.
+    def get_history(self, date_from: datetime | None = None, date_to: datetime | None = None) -> list[dict[str, Any]]:
+        """Get deals from trading history within specified interval.
 
-        TODO: Реализовать метод получения истории сделок через mt5.history_deals_get().
-        Требуется: парсинг дат (since/until), фильтрация по периоду, преобразование в словари.
+        Args:
+            date_from: Start date (datetime object). If None, uses 30 days ago.
+            date_to: End date (datetime object). If None, uses current time.
+
+        Returns:
+            [{"ticket": int, "order": int, "time": datetime, "type": str,
+              "entry": str, "position_id": int, "symbol": str, "volume": float,
+              "price": float, "commission": float, "swap": float, "profit": float,
+              "fee": float, "comment": str, "magic": int}, ...]
+            Empty list if no deals or error.
         """
-        logging.debug(f"[MT5] get_history(since={since}, until={until})")
-        return []
+        # Set default date range if not provided
+        if date_to is None:
+            date_to = datetime.now()
+        if date_from is None:
+            from datetime import timedelta
+
+            date_from = date_to - timedelta(days=30)
+
+        # Get deals for the specified period
+        deals = mt5.history_deals_get(date_from, date_to)
+
+        if deals is None:
+            logging.error(f"[MT5] get_history failed: {mt5.last_error()}")
+            return []
+
+        if len(deals) == 0:
+            return []
+
+        # Map deal types to readable names
+        deal_type_names = {
+            mt5.DEAL_TYPE_BUY: "buy",
+            mt5.DEAL_TYPE_SELL: "sell",
+            mt5.DEAL_TYPE_BALANCE: "balance",
+            mt5.DEAL_TYPE_CREDIT: "credit",
+            mt5.DEAL_TYPE_CHARGE: "charge",
+            mt5.DEAL_TYPE_CORRECTION: "correction",
+            mt5.DEAL_TYPE_BONUS: "bonus",
+            mt5.DEAL_TYPE_COMMISSION: "commission",
+            mt5.DEAL_TYPE_COMMISSION_DAILY: "commission_daily",
+            mt5.DEAL_TYPE_COMMISSION_MONTHLY: "commission_monthly",
+            mt5.DEAL_TYPE_COMMISSION_AGENT_DAILY: "commission_agent_daily",
+            mt5.DEAL_TYPE_COMMISSION_AGENT_MONTHLY: "commission_agent_monthly",
+            mt5.DEAL_TYPE_INTEREST: "interest",
+            mt5.DEAL_TYPE_BUY_CANCELED: "buy_canceled",
+            mt5.DEAL_TYPE_SELL_CANCELED: "sell_canceled",
+        }
+
+        # Map deal entry to readable names
+        deal_entry_names = {
+            mt5.DEAL_ENTRY_IN: "in",
+            mt5.DEAL_ENTRY_OUT: "out",
+            mt5.DEAL_ENTRY_INOUT: "inout",
+            mt5.DEAL_ENTRY_OUT_BY: "out_by",
+        }
+
+        result = []
+        for deal in deals:
+            result.append(
+                {
+                    "ticket": deal.ticket,
+                    "order": deal.order,
+                    "time": datetime.fromtimestamp(deal.time),
+                    "type": deal_type_names.get(deal.type, f"unknown_{deal.type}"),
+                    "entry": deal_entry_names.get(deal.entry, f"unknown_{deal.entry}"),
+                    "position_id": deal.position_id,
+                    "symbol": deal.symbol,
+                    "volume": deal.volume,
+                    "price": deal.price,
+                    "commission": deal.commission,
+                    "swap": deal.swap,
+                    "profit": deal.profit,
+                    "fee": getattr(deal, "fee", 0.0),
+                    "comment": getattr(deal, "comment", ""),
+                    "magic": deal.magic,
+                }
+            )
+
+        return result
 
     def get_portfolio(self) -> dict[str, Any]:
-        """Получение метрик портфеля: баланс/эквити/маржа.
+        """Get portfolio metrics: balance, equity, margin, profit.
 
-        TODO: Реализовать метод получения портфельных метрик через mt5.account_info().
-        Требуется: расчет свободной маржи, уровня маржи, других показателей риска.
+        Returns:
+            {"balance": float, "equity": float, "margin": float,
+             "free_margin": float, "margin_level": float, "profit": float,
+             "currency": str, "leverage": int, "trade_mode": str}
+            Returns dict with zeros on error.
         """
-        logging.debug("[MT5] get_portfolio()")
-        return {"balance": 0.0, "equity": 0.0, "margin": 0.0, "free_margin": 0.0}
+        account_info = mt5.account_info()
+
+        if account_info is None:
+            logging.error(f"[MT5] get_portfolio: account_info failed: {mt5.last_error()}")
+            return {
+                "balance": 0.0,
+                "equity": 0.0,
+                "margin": 0.0,
+                "free_margin": 0.0,
+                "margin_level": 0.0,
+                "profit": 0.0,
+                "currency": "",
+                "leverage": 0,
+                "trade_mode": "unknown",
+            }
+
+        # Map trade mode to readable string
+        trade_mode_names = {
+            0: "demo",
+            1: "contest",
+            2: "real",
+        }
+
+        # Calculate margin level (equity / margin * 100)
+        margin_level = (account_info.equity / account_info.margin * 100.0) if account_info.margin > 0 else 0.0
+
+        result = {
+            "balance": account_info.balance,
+            "equity": account_info.equity,
+            "margin": account_info.margin,
+            "free_margin": account_info.margin_free,
+            "margin_level": margin_level,
+            "profit": account_info.profit,
+            "currency": account_info.currency,
+            "leverage": account_info.leverage,
+            "trade_mode": trade_mode_names.get(account_info.trade_mode, "unknown"),
+        }
+
+        logging.debug(
+            f"[MT5] get_portfolio: balance={result['balance']:.2f}, equity={result['equity']:.2f}, "
+            f"margin_level={result['margin_level']:.2f}%"
+        )
+
+        return result
 
     def get_symbol_info(self, symbol: str) -> dict[str, Any]:
         """Получение параметров символа для торговли.
@@ -556,24 +898,38 @@ class MetaTraderClient:
             logging.exception(f"[MT5] get_symbol_info: exception: {e}")
             return {}
 
-    def eur_to_lots(self, amount_eur: float, symbol: str) -> float:
-        """Convert EUR amount to lots for symbol.
+    def currency_to_lots(self, amount: float, currency: str, symbol: str) -> float:
+        """Convert currency amount to lots for symbol.
 
-        Returns 0 if conversion fails.
+        Args:
+            amount: Amount in specified currency
+            currency: Currency code ("USD", "EUR", etc.)
+            symbol: Trading symbol (e.g., "EURUSD")
+
+        Returns:
+            Volume in lots, or 0 if conversion fails.
         """
-        # Get EUR/USD rate
-        eurusd_tick = self.get_tick("EURUSD")
-        if not eurusd_tick:
-            logging.error("[MT5] eur_to_lots: could not get EURUSD rate")
-            return 0.0
-
-        # Convert EUR to USD
-        amount_usd = amount_eur * eurusd_tick["bid"]
-
         # Get symbol info
         sym_info = self.get_symbol_info(symbol)
         if not sym_info:
-            logging.error(f"[MT5] eur_to_lots: could not get info for {symbol}")
+            logging.error(f"[MT5] currency_to_lots: could not get info for {symbol}")
+            return 0.0
+
+        # Convert to USD if needed
+        amount_usd = amount
+        currency_upper = currency.upper()
+
+        if currency_upper == "EUR":
+            # Get EUR/USD rate
+            eurusd_tick = self.get_tick("EURUSD")
+            if not eurusd_tick:
+                logging.error("[MT5] currency_to_lots: could not get EURUSD rate")
+                return 0.0
+            amount_usd = amount * eurusd_tick["bid"]
+        elif currency_upper == "USD":
+            amount_usd = amount
+        else:
+            logging.error(f"[MT5] currency_to_lots: unsupported currency {currency}")
             return 0.0
 
         # Calculate and round lots
@@ -581,28 +937,7 @@ class MetaTraderClient:
         lots = self._round_to_step(lots, sym_info["lot_step"])
 
         if lots < sym_info["min_lot"]:
-            logging.warning(f"[MT5] eur_to_lots: {lots} below min_lot {sym_info['min_lot']}")
-            return 0.0
-
-        return lots
-
-    def usd_to_lots(self, amount_usd: float, symbol: str) -> float:
-        """Convert USD amount to lots for symbol.
-
-        Returns 0 if conversion fails.
-        """
-        # Get symbol info
-        sym_info = self.get_symbol_info(symbol)
-        if not sym_info:
-            logging.error(f"[MT5] usd_to_lots: could not get info for {symbol}")
-            return 0.0
-
-        # Calculate and round lots
-        lots = amount_usd / sym_info["contract_size"]
-        lots = self._round_to_step(lots, sym_info["lot_step"])
-
-        if lots < sym_info["min_lot"]:
-            logging.warning(f"[MT5] usd_to_lots: {lots} below min_lot {sym_info['min_lot']}")
+            logging.warning(f"[MT5] currency_to_lots: {lots} below min_lot {sym_info['min_lot']}")
             return 0.0
 
         return lots

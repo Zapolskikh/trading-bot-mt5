@@ -2,7 +2,59 @@ import pytest
 from trading_bot_mt5.client import MetaTraderClient
 
 
-@pytest.mark.skip(reason="Requires real MT5 credentials and connection")
+@pytest.mark.integration
+def test_currency_to_lots_conversion(mt5_credentials):
+    """Тест конвертации валют в лоты через currency_to_lots метод.
+
+    Проверяет:
+    - Конвертация USD в лоты
+    - Конвертация EUR в лоты (через EURUSD курс)
+    - Валидация минимального размера лота
+    - Округление по lot_step
+    - Обработка неподдерживаемых валют
+    """
+    if not mt5_credentials.get("login"):
+        pytest.skip("MT5 credentials not configured")
+
+    client = MetaTraderClient(
+        login=mt5_credentials.get("login"),
+        password=mt5_credentials.get("password"),
+        server=mt5_credentials.get("server"),
+    )
+    symbol = "EURUSD"
+
+    try:
+        assert client.connect() is True
+
+        # Test USD conversion
+        lots_from_usd = client.currency_to_lots(amount=10000.0, currency="USD", symbol=symbol)
+        assert lots_from_usd > 0, "USD conversion should return positive lots"
+        assert lots_from_usd == pytest.approx(0.1, abs=0.01), "10k USD should be ~0.1 lots for EURUSD"
+
+        # Test EUR conversion
+        lots_from_eur = client.currency_to_lots(amount=10000.0, currency="EUR", symbol=symbol)
+        assert lots_from_eur > 0, "EUR conversion should return positive lots"
+        # EUR conversion depends on EURUSD rate, should be close to USD result
+        assert 0.05 < lots_from_eur < 0.15, "EUR conversion should yield reasonable lot size"
+
+        # Test small amount (below min_lot)
+        lots_small = client.currency_to_lots(amount=100.0, currency="USD", symbol=symbol)
+        assert lots_small == 0, "Amount below min_lot should return 0"
+
+        # Test unsupported currency
+        lots_invalid = client.currency_to_lots(amount=1000.0, currency="GBP", symbol=symbol)
+        assert lots_invalid == 0, "Unsupported currency should return 0"
+
+        # Test case insensitivity
+        lots_lowercase = client.currency_to_lots(amount=5000.0, currency="usd", symbol=symbol)
+        lots_uppercase = client.currency_to_lots(amount=5000.0, currency="USD", symbol=symbol)
+        assert lots_lowercase == lots_uppercase, "Currency parameter should be case-insensitive"
+
+    finally:
+        client.disconnect()
+
+
+@pytest.mark.integration
 def test_mt5_connection_workflow(mt5_credentials):
     """Интеграционный тест полного цикла работы MT5 клиента.
 
@@ -81,14 +133,17 @@ def test_mt5_connection_workflow(mt5_credentials):
         limit_price = tick_order["bid"] - 0.001
         assert limit_price > 0, "Limit price should be positive"
 
-        # Place limit order
+        # Place limit order (using currency_to_lots converter)
+        volume_lots = client.currency_to_lots(amount=order_amount_usd, currency="USD", symbol=symbol)
+        assert volume_lots > 0, "Currency conversion should return valid lot size"
+
         order_result = client.place_order(
             symbol=symbol,
             side="buy",
-            volume=order_amount_usd,
+            volume=volume_lots,
             order_type="limit",
             price=limit_price,
-            volume_currency="usd",
+            volume_currency="lots",
         )
         assert order_result["success"], f"Order placement failed: {order_result['comment']}"
         assert order_result["ticket"] > 0, "Order ticket should be positive"
@@ -131,4 +186,113 @@ def test_mt5_connection_workflow(mt5_credentials):
 
     finally:
         # Cleanup
+        client.disconnect()
+
+
+@pytest.mark.integration
+def test_get_positions_and_portfolio(mt5_credentials):
+    """Тест получения открытых позиций и данных портфеля.
+
+    Проверяет:
+    - Получение списка всех позиций через get_positions()
+    - Фильтрация позиций по символу
+    - Получение метрик портфеля через get_portfolio()
+    - Структуру возвращаемых данных
+    """
+    if not mt5_credentials.get("login"):
+        pytest.skip("MT5 credentials not configured")
+
+    client = MetaTraderClient(
+        login=mt5_credentials.get("login"),
+        password=mt5_credentials.get("password"),
+        server=mt5_credentials.get("server"),
+    )
+
+    try:
+        assert client.connect() is True
+
+        # Test get_positions (all)
+        all_positions = client.get_positions()
+        assert isinstance(all_positions, list), "get_positions should return list"
+
+        # Test get_positions (filtered by symbol)
+        eurusd_positions = client.get_positions(symbol="EURUSD")
+        assert isinstance(eurusd_positions, list), "get_positions(symbol) should return list"
+
+        # If there are any EURUSD positions, verify structure
+        if len(eurusd_positions) > 0:
+            pos = eurusd_positions[0]
+            assert "ticket" in pos and pos["ticket"] > 0
+            assert "symbol" in pos and pos["symbol"] == "EURUSD"
+            assert "type" in pos and pos["type"] in ["buy", "sell"]
+            assert "volume" in pos and pos["volume"] > 0
+            assert "price_open" in pos
+            assert "profit" in pos
+            assert "sl" in pos and "tp" in pos
+
+        # Test get_portfolio
+        portfolio = client.get_portfolio()
+        assert isinstance(portfolio, dict), "get_portfolio should return dict"
+        assert "balance" in portfolio and portfolio["balance"] >= 0
+        assert "equity" in portfolio and portfolio["equity"] >= 0
+        assert "margin" in portfolio and portfolio["margin"] >= 0
+        assert "margin_level" in portfolio
+        assert "currency" in portfolio and len(portfolio["currency"]) > 0
+        assert "leverage" in portfolio and portfolio["leverage"] > 0
+        assert "trade_mode" in portfolio and portfolio["trade_mode"] in ["demo", "contest", "real"]
+
+    finally:
+        client.disconnect()
+
+
+@pytest.mark.integration
+def test_get_history(mt5_credentials):
+    """Тест получения торговой истории.
+
+    Проверяет:
+    - Получение истории сделок за период
+    - Использование дефолтного периода (30 дней)
+    - Структуру данных сделок
+    """
+    if not mt5_credentials.get("login"):
+        pytest.skip("MT5 credentials not configured")
+
+    client = MetaTraderClient(
+        login=mt5_credentials.get("login"),
+        password=mt5_credentials.get("password"),
+        server=mt5_credentials.get("server"),
+    )
+
+    try:
+        assert client.connect() is True
+
+        # Test get_history with default date range (30 days)
+        history = client.get_history()
+        assert isinstance(history, list), "get_history should return list"
+
+        # If there's any history, verify structure
+        if len(history) > 0:
+            deal = history[0]
+            assert "ticket" in deal and deal["ticket"] > 0
+            assert "order" in deal
+            assert "time" in deal
+            assert "type" in deal
+            assert "entry" in deal
+            assert "symbol" in deal
+            assert "volume" in deal
+            assert "price" in deal
+            assert "commission" in deal
+            assert "swap" in deal
+            assert "profit" in deal
+
+        # Test get_history with custom date range
+        from datetime import datetime, timedelta
+
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+
+        history_week = client.get_history(date_from=date_from, date_to=date_to)
+        assert isinstance(history_week, list), "get_history with dates should return list"
+
+    finally:
         client.disconnect()
