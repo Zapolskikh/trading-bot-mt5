@@ -4,16 +4,12 @@ from enum import Enum
 
 
 class SignalType(Enum):
-    """Type of trading signal."""
-
     LONG = "LONG"
     SHORT = "SHORT"
     NONE = "NONE"
 
 
 class RangePeriod(Enum):
-    """Opening range period in minutes."""
-
     MIN_5 = 5
     MIN_15 = 15
     MIN_30 = 30
@@ -21,8 +17,6 @@ class RangePeriod(Enum):
 
 
 class Timeframe(Enum):
-    """Chart timeframe in minutes for candle data."""
-
     M1 = 1
     M5 = 5
     M15 = 15
@@ -113,7 +107,6 @@ class ConfirmationInfo:
     candle: Candle
     breakout_distance: float  # How far price closed beyond the range
     breakout_pct: float  # Percentage beyond range
-    is_strong_close: bool  # Whether close is in favorable portion of candle
 
     @property
     def body_size(self) -> float:

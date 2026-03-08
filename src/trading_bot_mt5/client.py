@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, Literal
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -120,7 +120,7 @@ class MetaTraderClient:
     def place_order(
         self,
         symbol: str,
-        side: str,
+        side: Literal["buy", "sell"],
         volume: float,
         sl: float | None = None,
         tp: float | None = None,

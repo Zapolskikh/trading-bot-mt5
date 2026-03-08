@@ -34,7 +34,6 @@ def create_range_lines(
         }
     )
 
-    # Midpoint line (optional)
     if show_midpoint:
         hlines.append(
             {
@@ -63,7 +62,6 @@ def create_signal_markers(
     if signal_time not in df.index:
         return addplots, hlines
 
-    # Create entry marker
     marker_data = pd.Series(index=df.index, dtype=float)
     marker_data[:] = float("nan")
     marker_data[signal_time] = signal.entry_price
@@ -124,10 +122,8 @@ def plot_orb_chart(
     """
     Plot a candlestick chart with opening range levels and signals.
     """
-    # Handle both DataFrame and Candle list inputs
     if isinstance(candles, pd.DataFrame):
         df = candles.copy()
-        # Normalize column names
         df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
         if not isinstance(df.columns[0], str) or df.columns[0].lower() not in [
             "open",
@@ -135,27 +131,21 @@ def plot_orb_chart(
             "low",
             "close",
         ]:
-            # Columns might need title case for mplfinance
             df.columns = [str(c).title() for c in df.columns]
     else:
         df = candles_to_dataframe(candles)
 
-    # Build plot configuration
     addplots = []
     all_hlines = []
-
-    # Add opening range lines
     if opening_range is not None:
         range_hlines = create_range_lines(opening_range, show_midpoint)
         all_hlines.extend(range_hlines)
 
-    # Add signal markers and levels
     if signal is not None:
         signal_addplots, signal_hlines = create_signal_markers(signal, df)
         addplots.extend(signal_addplots)
         all_hlines.extend(signal_hlines)
 
-    # Combine all hlines
     combined_hlines = None
     if all_hlines:
         combined_hlines = {
@@ -165,7 +155,6 @@ def plot_orb_chart(
             "linewidths": [h["linewidths"] for h in all_hlines],
         }
 
-    # Plot configuration
     kwargs = {
         "type": "candle",
         "style": style,

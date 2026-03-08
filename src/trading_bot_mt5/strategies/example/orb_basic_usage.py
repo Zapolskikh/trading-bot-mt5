@@ -1,8 +1,11 @@
 import yfinance as yf
 import pandas as pd
 
+from trading_bot_mt5.strategies.orb.calculation import RangeSizeCalculator
 from trading_bot_mt5.strategies.orb.models import NYSE_SESSION, RangePeriod, Timeframe
 from trading_bot_mt5.strategies.orb.strategy import ConfirmationConfig, ORBConfig, ORBStrategy
+
+# from trading_bot_mt5.strategies.orb.utils import dataframe_to_candles
 from trading_bot_mt5.strategies.orb.visualization import plot_orb_chart
 
 
@@ -17,11 +20,9 @@ def fetch_market_data(ticker: str = "SPY", period: str = "5d", interval: str = "
         print(f"📥 Fetching {ticker} data from Yahoo Finance ({period}, {interval})...")
         df = yf.download(ticker, period=period, interval=interval, progress=False)
 
-        # Flatten multi-level columns if present
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # Convert UTC timestamps to US/Eastern (NYSE timezone)
         if df.index.tz is not None:
             df.index = df.index.tz_convert("US/Eastern")
 
@@ -37,8 +38,8 @@ def example_visualization():
     symbol = "QQQ"
     timeframe = Timeframe.M1
 
-    # Fetch real data for a single day
     df = fetch_market_data(symbol, period="1d", interval=f"{timeframe.value}m")
+    df_15m = fetch_market_data(symbol, period="1d", interval="15m")  # For ATR calculation
 
     # Filter to get just the first trading session
     if len(df) > 0:
@@ -48,6 +49,8 @@ def example_visualization():
         print("❌ No data available")
         return
 
+    _, max_orb_size = RangeSizeCalculator().opening_range_allowed(df_15m)
+
     # Configure strategy
     config = ORBConfig(
         range_period=RangePeriod.MIN_15,
@@ -55,11 +58,12 @@ def example_visualization():
         session=NYSE_SESSION,
         confirmation=ConfirmationConfig(
             require_close=True,
-            consecutive_closes=0,
+            consecutive_closes=2,
         ),
         risk_reward_target=2,
         use_range_stop_loss=True,
-        stop_loss_buffer_pct=0.6,
+        stop_loss_buffer_pct=0.55,
+        max_range_size=max_orb_size,
     )
 
     # Run strategy
@@ -73,6 +77,7 @@ def example_visualization():
         print(f"   High: ${orb.high:.2f}")
         print(f"   Low: ${orb.low:.2f}")
         print(f"   Size: ${orb.range_size:.2f}")
+        print(f"   Max Allowed: ${max_orb_size:.2f}" if max_orb_size is not None else "")
 
     if signals:
         signal = signals[0]

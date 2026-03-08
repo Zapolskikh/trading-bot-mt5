@@ -1,9 +1,8 @@
 app:
   mode: "paper"            # "live" | "paper" | "backtest"
-  symbols: ["EURUSD","GBPUSD"]
-  base_timeframe: "M15"
+  symbols: ["US500.cash", "US100.cash", "US30.cash"]
+  base_timeframe: "M1"
   data_window: 500
-  barsize: "ask"           # "bid" | "ask" | "mid"
 
 risk:
   per_trade_pct: 0.5
@@ -12,20 +11,10 @@ risk:
   dynamic:
     enabled: false
 
-strategy:
-  name: "MyStrategyV1"
-  indicators:
-    - type: "EMA"
-      period: 20
-    - type: "EMA"
-      period: 50
-    - type: "ATR"
-      period: 14
-  entry:
-    min_signal_strength: 0.6
-  exit:
-    atr_multiplier_sl: 1.5
-    atr_multiplier_tp: 2.0
+metatrader:
+  login:
+  password:
+  server: FTMO-Demo
 
 telegram:
   enabled: true

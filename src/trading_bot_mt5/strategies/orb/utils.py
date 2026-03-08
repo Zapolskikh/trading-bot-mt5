@@ -86,17 +86,14 @@ def validate_dataframe(df: pd.DataFrame) -> tuple[bool, list[str]]:
     if missing:
         issues.append(f"Missing columns: {missing}")
 
-    # Check index
     if not isinstance(df.index, pd.DatetimeIndex):
         has_date_col = any(col in df_lower for col in ["date", "datetime", "timestamp"])
         if not has_date_col:
             issues.append("No DatetimeIndex or date column found")
 
-    # Check for empty data
     if len(df) == 0:
         issues.append("DataFrame is empty")
 
-    # Check for NaN values
     if df.isnull().any().any():
         nan_cols = df.columns[df.isnull().any()].tolist()
         issues.append(f"NaN values found in columns: {nan_cols}")

@@ -21,20 +21,11 @@ class ConfirmationConfig:
     # Require candle to close outside range (vs just wick)
     require_close: bool = True
 
-    # Minimum % beyond range for valid breakout
-    min_breakout_pct: float = 0.0
-
-    # Require close in favorable portion of candle (upper 25% for long, lower 25% for short)
-    require_strong_close: bool = False
-
-    # Minimum body size as % of candle range
-    min_body_pct: float = 0.0
-
     # Number of consecutive closes required outside range
     consecutive_closes: int = 1
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class ORBConfig:
     range_timeframe: Timeframe
     range_period: RangePeriod = RangePeriod.MIN_15
@@ -53,7 +44,7 @@ class ORBConfig:
     max_range_size: float | None = None  # Maximum range size in price
 
     # Time filters
-    no_trade_after: time | None = None  # Stop taking new trades after this time
+    no_trade_after: time = time(11, 00)  # Stop taking new trades after this time
 
 
 class ORBStrategy:
@@ -149,13 +140,6 @@ class ORBStrategy:
     def _check_breakout(self, candle: Candle) -> tuple[SignalType, ConfirmationInfo | None]:
         """
         Check if candle represents a valid breakout with confirmation.
-
-        Args:
-            candle: The candle to check
-            timeframe: The timeframe of this candle (for multi-TF confirmation)
-
-        Returns:
-            Tuple of (signal_type, confirmation_info)
         """
         if self._opening_range is None:
             return SignalType.NONE, None
@@ -164,8 +148,6 @@ class ORBStrategy:
         conf = self.config.confirmation
 
         # Use confirmation config settings
-        min_breakout_pct = conf.min_breakout_pct
-        min_breakout = orb.range_size * (min_breakout_pct / 100)
         require_close = conf.require_close
 
         signal_type = SignalType.NONE
@@ -173,18 +155,18 @@ class ORBStrategy:
 
         if require_close:
             # Check for close above/below range with buffer
-            if candle.close > orb.high + min_breakout:
+            if candle.close > orb.high:
                 signal_type = SignalType.LONG
                 breakout_distance = candle.close - orb.high
-            elif candle.close < orb.low - min_breakout:
+            elif candle.close < orb.low:
                 signal_type = SignalType.SHORT
                 breakout_distance = orb.low - candle.close
         else:
             # Check for price breaking range (using high/low)
-            if candle.high > orb.high + min_breakout:
+            if candle.high > orb.high:
                 signal_type = SignalType.LONG
                 breakout_distance = candle.high - orb.high
-            elif candle.low < orb.low - min_breakout:
+            elif candle.low < orb.low:
                 signal_type = SignalType.SHORT
                 breakout_distance = orb.low - candle.low
 
@@ -193,20 +175,6 @@ class ORBStrategy:
             self._consecutive_breakout_closes = 0
             self._pending_breakout_direction = SignalType.NONE
             return SignalType.NONE, None
-
-        # Check for strong close if required
-        is_strong_close = self._check_strong_close(candle, signal_type)
-        if conf.require_strong_close and not is_strong_close:
-            return SignalType.NONE, None
-
-        # Check minimum body size if required
-        if conf.min_body_pct > 0:
-            candle_range = candle.high - candle.low
-            if candle_range > 0:
-                body_size = abs(candle.close - candle.open)
-                body_pct = (body_size / candle_range) * 100
-                if body_pct < conf.min_body_pct:
-                    return SignalType.NONE, None
 
         # Handle consecutive closes requirement
         if conf.consecutive_closes > 1:
@@ -228,27 +196,9 @@ class ORBStrategy:
             candle=candle,
             breakout_distance=breakout_distance,
             breakout_pct=breakout_pct,
-            is_strong_close=is_strong_close,
         )
 
         return signal_type, confirmation_info
-
-    def _check_strong_close(self, candle: Candle, signal_type: SignalType) -> bool:
-        """Check if candle has a strong close in the direction of the breakout."""
-        candle_range = candle.high - candle.low
-        if candle_range == 0:
-            return True
-
-        close_position = (candle.close - candle.low) / candle_range
-
-        if signal_type == SignalType.LONG:
-            # Close should be in upper 25% of candle for bullish breakout
-            return close_position >= 0.75
-        elif signal_type == SignalType.SHORT:
-            # Close should be in lower 25% of candle for bearish breakout
-            return close_position <= 0.25
-
-        return False
 
     def _calculate_stop_loss(self, signal_type: SignalType) -> float | None:
         """Calculate stop loss level."""
@@ -350,7 +300,6 @@ class ORBStrategy:
                 "session": self.config.session.name,
                 "breakout_distance": confirmation_info.breakout_distance if confirmation_info else None,
                 "breakout_pct": confirmation_info.breakout_pct if confirmation_info else None,
-                "is_strong_close": confirmation_info.is_strong_close if confirmation_info else None,
             },
         )
 
@@ -360,31 +309,16 @@ class ORBStrategy:
     def process_candles(self, candles: list[Candle] | pd.DataFrame) -> list[Signal]:
         """
         Process multiple candles and return all generated signals.
-
-        Args:
-            candles: List of Candle objects OR pandas DataFrame with OHLCV data.
-                     DataFrame should have DatetimeIndex and columns:
-                     Open, High, Low, Close, Volume (case-insensitive)
-
-        Returns:
-            List of signals generated
-
-        Example with DataFrame (yfinance):
-            >>> import yfinance as yf
-            >>> df = yf.download("AAPL", period="1d", interval="5m")
-            >>> signals = strategy.process_candles(df)
-
-        Example with Candle list:
-            >>> signals = strategy.process_candles(candles)
         """
         # Normalize input to list of Candles
         candle_list = normalize_candle_data(candles)
 
         signals = []
         for candle in candle_list:
-            signal = self.process_candle(candle)
-            if signal is not None:
-                signals.append(signal)
+            if self.config.session.is_within_session(candle.timestamp):
+                signal = self.process_candle(candle)
+                if signal is not None:
+                    signals.append(signal)
         return signals
 
     def process_dataframe(self, df: pd.DataFrame) -> list[Signal]:
@@ -393,17 +327,6 @@ class ORBStrategy:
 
         This is an explicit method for DataFrame input. Equivalent to
         process_candles(df) but makes the intent clearer.
-
-        Args:
-            df: DataFrame with OHLCV data (e.g., from yfinance)
-
-        Returns:
-            List of signals generated
-
-        Example:
-            >>> import yfinance as yf
-            >>> df = yf.download("SPY", period="1d", interval="5m")
-            >>> signals = strategy.process_dataframe(df)
         """
         return self.process_candles(df)
 
@@ -414,22 +337,6 @@ class ORBStrategy:
         Use this when you want to:
         1. Build the opening range on one timeframe (e.g., 15m candles)
         2. Confirm breakouts on a different timeframe (e.g., 5m candles)
-
-        Args:
-            candle: The confirmation candle to check
-            timeframe: The timeframe of this candle
-
-        Returns:
-            Signal if breakout is confirmed, None otherwise
-
-        Example:
-            # Build range with 15m candles
-            for candle in range_candles_15m:
-                strategy.process_candle(candle)
-
-            # Confirm breakout with 5m candles
-            for candle in confirmation_candles_5m:
-                signal = strategy.process_confirmation_candle(candle, Timeframe.M5)
         """
         # Must have established range first
         if not self.is_range_established:
@@ -480,7 +387,6 @@ class ORBStrategy:
                 "session": self.config.session.name,
                 "breakout_distance": confirmation_info.breakout_distance if confirmation_info else None,
                 "breakout_pct": confirmation_info.breakout_pct if confirmation_info else None,
-                "is_strong_close": confirmation_info.is_strong_close if confirmation_info else None,
             },
         )
 
