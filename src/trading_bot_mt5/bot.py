@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime, timedelta
 
 from trading_bot_mt5.client import MetaTraderClient
@@ -89,7 +90,7 @@ class TradeEngine:
                 # _, max_orb_size = RangeSizeCalculator().opening_range_allowed(pd.DataFrame())
 
                 signals = self.strategy.process_candles(df)
-                if DEBUG:
+                if DEBUG and abs(datetime.now() - df.index[-1]) <= timedelta(minutes=2):
                     plot_orb_chart(
                         df,
                         opening_range=self.strategy.opening_range,
@@ -98,6 +99,8 @@ class TradeEngine:
                         style="yahoo",
                         show_volume=False,
                         show_midpoint=True,
+                        save_path=f"output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png",
+                        show=DEBUG,
                     )
 
                 if signals:
@@ -136,6 +139,7 @@ class TradeEngine:
                         self.alerts.send_signal(signal.__dict__)
                         self.active_orders[symbol] = {order_id: signal}
                 self.strategy.reset()  # Сброс состояния стратегии после обработки сигналов
+                time.sleep(10)
 
         # TODO: обработка exit сигналов и закрытие позиций
 
