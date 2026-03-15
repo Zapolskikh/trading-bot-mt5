@@ -82,6 +82,7 @@ class TradeEngine:
         - exit → close_position
         - логирование и алерты
         """
+        logging.info("[Engine] Starting main trading loop")
         while True:
             for symbol in self.config["app"]["symbols"]:
                 df = self.mt.get_market_data(
@@ -101,6 +102,10 @@ class TradeEngine:
                         show_midpoint=True,
                         save_path=f"output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png",
                         show=DEBUG,
+                    )
+                    logging.info(
+                        "[Engine] Debug mode: plotting ORB chart with latest data and signals:"
+                        f" output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png"
                     )
 
                 if signals:
