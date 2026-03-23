@@ -1,8 +1,10 @@
+import time
 import logging
 from typing import Any, Literal
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
+import pytz
 import pandas as pd
 import MetaTrader5 as mt5
 
@@ -76,26 +78,39 @@ class MetaTraderClient:
             success_codes.add(getattr(mt5, "TRADE_RETCODE_PLACED", None))
         return retcode in success_codes
 
-    def get_market_data(self, symbol: str, timeframe: str, window: int) -> pd.DataFrame:
+    def get_market_data(
+        self, symbol: str, timeframe: str, window: int, timezone: str = "America/New_York"
+    ) -> pd.DataFrame:
         """Fetch OHLCV bars as pandas DataFrame indexed by time."""
         if timeframe not in self.TIMEFRAMES:
             logging.error(f"[MT5] get_market_data: unsupported timeframe {timeframe}")
             return pd.DataFrame()
 
-        # bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns.
-        # None in case of an error.
-        rates = mt5.copy_rates_from_pos(symbol, self.TIMEFRAMES[timeframe], 0, window)
+        for _ in range(3):  # Retry up to 3 times in case of transient errors
+            # bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns.
+            # None in case of an error.
+            rates = mt5.copy_rates_from_pos(symbol, self.TIMEFRAMES[timeframe], 0, window)
 
-        if rates is None or len(rates) == 0:
-            logging.error(f"[MT5] get_market_data failed: {mt5.last_error()}")
-            return pd.DataFrame()
+            if rates is None or len(rates) == 0:
+                logging.error(f"[MT5] get_market_data failed: {mt5.last_error()}")
+                return pd.DataFrame()
 
-        # Convert numpy array to DataFrame directly
-        df = pd.DataFrame(rates)
-        df["time"] = pd.to_datetime(df["time"], unit="s")
-        df.set_index("time", inplace=True)
+            # Convert numpy array to DataFrame directly
+            df = pd.DataFrame(rates)
+            df["time"] = pd.to_datetime(df["time"], unit="s")
+            df["time"] = df["time"].dt.tz_localize("Etc/GMT-3")  # UTC+3
+            df["time"] = df["time"].dt.tz_convert(timezone)
+            df = df.set_index("time")
+            df = df.drop(columns=["real_volume", "spread"]).rename(columns={"tick_volume": "volume"})
 
-        return df
+            now = datetime.now(tz=pytz.timezone(timezone)).replace(second=0, microsecond=0)
+            last = df.index[-1].to_pydatetime().replace(second=0, microsecond=0)
+            is_equal = now == last
+
+            if is_equal:
+                return df
+            time.sleep(0.5)
+        return pd.DataFrame()
 
     def get_tick(self, symbol: str) -> dict[str, Any]:
         """Get last tick for symbol with bid/ask/last prices and volume.
@@ -124,7 +139,9 @@ class MetaTraderClient:
         volume: float,
         sl: float | None = None,
         tp: float | None = None,
-        order_type: str = "market",
+        order_type: Literal["market", "limit", "stop"] = "market",
+        type_time: Literal["gtc", "day", "spec"] = "day",
+        expiration: int | None = None,
         price: float | None = None,
         volume_currency: str = "lots",
     ) -> dict[str, Any]:
@@ -199,6 +216,12 @@ class MetaTraderClient:
                 "action": "none",
             }
 
+        mapping_type_time = {
+            "gtc": mt5.ORDER_TIME_GTC,
+            "day": mt5.ORDER_TIME_DAY,
+            "spec": mt5.ORDER_TIME_SPECIFIED,
+        }
+
         # Build request
         request = {
             "action": order_action,
@@ -210,7 +233,8 @@ class MetaTraderClient:
             "tp": float(tp) if tp else 0.0,
             "magic": self.MAGIC_NUMBER,
             "comment": f"[TradingBot] {side_lower} {type_lower}",
-            "type_time": mt5.ORDER_TIME_GTC,
+            "type_time": mapping_type_time[type_time],
+            "expiration": expiration,  # Only used if type_time is "spec"
             "type_filling": mt5.ORDER_FILLING_FOK if type_lower == "market" else mt5.ORDER_FILLING_IOC,
         }
 

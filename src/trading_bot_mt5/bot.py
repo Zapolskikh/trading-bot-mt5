@@ -1,15 +1,14 @@
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from trading_bot_mt5.client import MetaTraderClient
 from trading_bot_mt5.common.config import load_config
-from trading_bot_mt5.risk_management import RiskConfig, RiskManagement
 from trading_bot_mt5.services.csv_journal import JournalService
 from trading_bot_mt5.services.tg_alerts import AlertService
 
 # from trading_bot_mt5.strategies.orb.calculation import RangeSizeCalculator
-from trading_bot_mt5.strategies.orb.models import NYSE_SESSION, RangePeriod, Timeframe
+from trading_bot_mt5.strategies.orb.models import ORB_SESSION, RangePeriod, Timeframe
 from trading_bot_mt5.strategies.orb.strategy import ConfirmationConfig, ORBConfig, ORBStrategy
 from trading_bot_mt5.strategies.orb.visualization import plot_orb_chart
 
@@ -33,21 +32,12 @@ class TradeEngine:
             password=mt_cfg["password"],
             server=mt_cfg["server"],
         )
-        risk_cfg = self.config.get("risk", {})
-        self.risk = RiskManagement(
-            RiskConfig(
-                per_trade_pct=risk_cfg.get("per_trade_pct", 0.5),
-                per_day_pct=risk_cfg.get("per_day_pct", 2.0),
-                max_active_trades=risk_cfg.get("max_active_trades", 4),
-            ),
-            mt5_client=self.mt,
-        )
 
         # ORB strategy setup
         self.orb_config = ORBConfig(
             range_period=RangePeriod.MIN_15,
             range_timeframe=Timeframe.M1,
-            session=NYSE_SESSION,
+            session=ORB_SESSION,
             confirmation=ConfirmationConfig(
                 require_close=True,
                 consecutive_closes=2,
@@ -63,6 +53,7 @@ class TradeEngine:
         telegram_cfg = self.config.get("telegram", {})
         self.alerts = AlertService(enabled=telegram_cfg.get("enabled", False))
 
+        self.trading_date = datetime.now()
         self.active_orders: dict = {}
 
     def start(self) -> bool:
@@ -84,6 +75,10 @@ class TradeEngine:
         """
         logging.info("[Engine] Starting main trading loop")
         while True:
+            if self.trading_date.date() != datetime.now().date():
+                self.reset_daily()
+                self.trading_date = datetime.now()
+
             for symbol in self.config["app"]["symbols"]:
                 df = self.mt.get_market_data(
                     symbol, self.config["app"]["base_timeframe"], self.config["app"]["data_window"]
@@ -91,40 +86,19 @@ class TradeEngine:
                 # _, max_orb_size = RangeSizeCalculator().opening_range_allowed(pd.DataFrame())
 
                 signals = self.strategy.process_candles(df)
-                if DEBUG and abs(datetime.now() - df.index[-1]) <= timedelta(minutes=2):
-                    plot_orb_chart(
-                        df,
-                        opening_range=self.strategy.opening_range,
-                        signal=signals[0] if signals else None,
-                        title=f"ORB Strategy - {symbol} ({self.orb_config.range_period.value}min Range)",
-                        style="yahoo",
-                        show_volume=False,
-                        show_midpoint=True,
-                        save_path=f"output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png",
-                        show=DEBUG,
-                    )
-                    logging.info(
-                        "[Engine] Debug mode: plotting ORB chart with latest data and signals:"
-                        f" output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png"
-                    )
-
                 if signals:
                     signal = signals[0]
-                    if (
-                        symbol not in self.active_orders
-                        and abs(datetime.now() - df.index[-1]) <= timedelta(minutes=2)
-                        and not DEBUG
-                    ):
+                    if symbol not in self.active_orders and ORB_SESSION.is_within_session(df.index[-1]):
                         logging.info(
                             f"[Engine] Signal for {symbol}: {signal.signal_type.value} at {signal.entry_price:.2f}"
                         )
                         resp = self.mt.place_order(
                             symbol=symbol,
                             side="buy" if signal.signal_type.value == "LONG" else "sell",
-                            volume=1,
+                            volume=0.1,
                             sl=signal.stop_loss,
                             tp=signal.take_profit,
-                            order_type="market",
+                            order_type="limit",
                             price=signal.entry_price,
                         )
                         order_id = str(resp.get("ticket", ""))
@@ -141,15 +115,25 @@ class TradeEngine:
                             order_id=order_id,
                             trade_id="",
                         )
-                        self.alerts.send_signal(signal.__dict__)
+                        # self.alerts.send_signal(signal.__dict__)
                         self.active_orders[symbol] = {order_id: signal}
+                        plot_orb_chart(
+                            df,
+                            opening_range=self.strategy.opening_range,
+                            signal=signals[0] if signals else None,
+                            title=f"ORB Strategy - {symbol} ({self.orb_config.range_period.value}min Range)",
+                            style="yahoo",
+                            show_volume=False,
+                            show_midpoint=True,
+                            save_path=f"output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png",
+                            show=DEBUG,
+                        )
                 self.strategy.reset()  # Сброс состояния стратегии после обработки сигналов
                 time.sleep(10)
 
         # TODO: обработка exit сигналов и закрытие позиций
 
     def reset_daily(self):
-        self.risk.reset_daily_limits()
         self.active_orders.clear()
         logging.info("[Engine] Daily reset completed")
 

@@ -286,6 +286,7 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
+            lots=0.1,
             timestamp=candle.timestamp,
             entry_price=entry_price,
             opening_range=self._opening_range,
@@ -310,6 +311,9 @@ class ORBStrategy:
         """
         Process multiple candles and return all generated signals.
         """
+        if len(candles) == 0:
+            return []
+
         # Normalize input to list of Candles
         candle_list = normalize_candle_data(candles)
 
@@ -373,6 +377,7 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
+            lots=0.1,
             timestamp=candle.timestamp,
             entry_price=entry_price,
             opening_range=self._opening_range,
