@@ -238,6 +238,9 @@ class MetaTraderClient:
             "type_filling": mt5.ORDER_FILLING_FOK if type_lower == "market" else mt5.ORDER_FILLING_IOC,
         }
 
+        if expiration is None:
+            request.pop("expiration")
+
         if type_lower == "market":
             request["deviation"] = self.DEVIATION
 
