@@ -12,7 +12,7 @@ from trading_bot_mt5.strategies.orb.models import ORB_SESSION, RangePeriod, Time
 from trading_bot_mt5.strategies.orb.strategy import ConfirmationConfig, ORBConfig, ORBStrategy
 from trading_bot_mt5.strategies.orb.visualization import plot_orb_chart
 
-DEBUG = True
+DEBUG = False
 
 
 class TradeEngine:
@@ -86,6 +86,19 @@ class TradeEngine:
                 # _, max_orb_size = RangeSizeCalculator().opening_range_allowed(pd.DataFrame())
 
                 signals = self.strategy.process_candles(df)
+
+                if DEBUG:
+                    plot_orb_chart(
+                        df,
+                        opening_range=self.strategy.opening_range,
+                        signal=signals[0] if signals else None,
+                        title=f"ORB Strategy - {symbol} ({self.orb_config.range_period.value}min Range)",
+                        style="yahoo",
+                        show_volume=False,
+                        show_midpoint=True,
+                        save_path=f"output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png",
+                        show=DEBUG,
+                    )
                 if signals:
                     signal = signals[0]
                     if symbol not in self.active_orders and ORB_SESSION.is_within_session(df.index[-1]):
