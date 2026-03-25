@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import mplfinance as mpf
+import io
 
 from trading_bot_mt5.strategies.orb.utils import candles_to_dataframe
 from trading_bot_mt5.strategies.orb.models import Candle, OpeningRange, Signal, SignalType
@@ -235,11 +236,12 @@ def plot_orb_chart(
     show_midpoint: bool = True,
     save_path: str | None = None,
     show: bool = True,
-) -> tuple[plt.Figure, list[plt.Axes]] | None:
+    return_bytes: bool = False,
+) -> tuple[plt.Figure, list[plt.Axes]] | bytes | None:
     """
     Plot a candlestick chart with opening range levels, signals, and a legend.
 
-    Returns (fig, axes) when show=False, otherwise None.
+    Returns (fig, axes) when show=False and return_bytes=False, bytes when return_bytes=True, otherwise None.
     """
     df = _normalize_dataframe(candles)
 
@@ -289,5 +291,13 @@ def plot_orb_chart(
     if show:
         plt.show()
         return None
+
+    if return_bytes:
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", bbox_inches="tight")
+        buffer.seek(0)
+        chart_bytes = buffer.getvalue()
+        plt.close(fig)  # Clean up the figure
+        return chart_bytes
 
     return fig, axes

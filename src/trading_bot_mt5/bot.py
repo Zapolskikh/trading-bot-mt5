@@ -115,7 +115,7 @@ class TradeEngine:
                             price=signal.entry_price,
                         )
                         order_id = str(resp.get("ticket", ""))
-                        self.journal.log_order(
+                        overall_message = dict(
                             timestamp=datetime.now().isoformat(),
                             symbol=symbol,
                             side="buy" if signal.signal_type.value == "LONG" else "sell",
@@ -124,16 +124,16 @@ class TradeEngine:
                             lots=signal.lots,
                             sl=signal.stop_loss,
                             tp=signal.take_profit,
-                            sl_dollars=(signal.entry_price - signal.stop_loss) * signal.lots,
-                            tp_dollars=(signal.take_profit - signal.entry_price) * signal.lots,
+                            sl_dollars=round(abs((signal.entry_price - signal.stop_loss) * signal.lots), 2),
+                            tp_dollars=round(abs((signal.take_profit - signal.entry_price) * signal.lots), 2),
                             status="PLACED",
                             order_id=order_id,
                             trade_id="",
                             **self.mt.get_portfolio(),
                         )
-                        # self.alerts.send_signal(signal.__dict__)
+                        self.journal.log_order(**overall_message)
                         self.active_orders[symbol] = {order_id: signal}
-                        plot_orb_chart(
+                        chart = plot_orb_chart(
                             df,
                             opening_range=self.strategy.opening_range,
                             signal=signals[0] if signals else None,
@@ -143,7 +143,9 @@ class TradeEngine:
                             show_midpoint=True,
                             save_path=f"output/orb_chart_{symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png",
                             show=DEBUG,
+                            return_bytes=True,
                         )
+                        self.alerts.send_chart(chart, overall_message)
                 self.strategy.reset()  # Сброс состояния стратегии после обработки сигналов
                 time.sleep(10)
 

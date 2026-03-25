@@ -43,6 +43,34 @@ class AlertService:
             logging.error(f"Error occurred while sending message: {e}")
             return False
 
+    def _send_image(self, image_bytes: bytes, caption: str = "") -> bool:
+        """
+        Sends an image to a Telegram channel or chat.
+
+        Args:
+            image_bytes (bytes): The image data as bytes.
+            caption (str): Optional caption for the image.
+        """
+        if not self.enabled:
+            return False
+
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
+        files = {"photo": image_bytes}
+        payload = {"chat_id": self.chat_id, "caption": caption, "parse_mode": "Markdown"}
+
+        try:
+            response = requests.post(url, data=payload, files=files, timeout=10)
+            response.raise_for_status()
+            logging.info("The image was sent successfully.")
+            return True
+        except Exception as e:
+            logging.error(f"Error occurred while sending image: {e}")
+            return False
+
+    def send_chart(self, image_bytes: bytes, caption: dict[str, Any]):
+        caption_str = self.format_dict_markdown({"Overall": caption})
+        return self._send_image(image_bytes, caption_str)
+
     def send_signal(self, signal: Dict[str, Any]):
         message = self.format_dict_markdown({"Signal": signal})
         self._send(message)
