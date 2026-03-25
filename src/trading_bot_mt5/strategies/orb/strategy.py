@@ -286,7 +286,7 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
-            lots=0.7,
+            lots=0.5,
             timestamp=candle.timestamp,
             entry_price=round(entry_price, 2),
             opening_range=self._opening_range,
@@ -377,7 +377,7 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
-            lots=0.7,
+            lots=0.5,
             timestamp=candle.timestamp,
             entry_price=round(entry_price, 2),
             opening_range=self._opening_range,
