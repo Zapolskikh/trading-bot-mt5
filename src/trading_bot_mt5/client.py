@@ -977,3 +977,49 @@ class MetaTraderClient:
             return float(v)
         q = (v / s).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         return float(q * s)
+
+    def close_all_positions(self):
+        # Get all open positions
+        positions = mt5.positions_get()
+
+        if positions is None or len(positions) == 0:
+            logging.info("No open positions found.")
+            return
+
+        logging.info(f"Found {len(positions)} open position(s). Closing all...")
+
+        for position in positions:
+            symbol = position.symbol
+            volume = position.volume
+            pos_type = position.type  # 0 = BUY, 1 = SELL
+
+            # To close: send opposite order
+            order_type = mt5.ORDER_TYPE_SELL if pos_type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+
+            # Get current price
+            tick = mt5.symbol_info_tick(symbol)
+            price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "position": position.ticket,
+                "symbol": symbol,
+                "volume": volume,
+                "type": order_type,
+                "price": price,
+                "deviation": 20,  # slippage in points
+                "magic": 0,
+                "comment": "close all",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+
+            result = mt5.order_send(request)
+
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                logging.info(f"✅ Closed {symbol} | Ticket: {position.ticket} | Volume: {volume}")
+            else:
+                logging.error(
+                    f"❌ Failed to close {symbol} | Ticket: {position.ticket} | Error: {result.retcode} -"
+                    f" {result.comment}"
+                )

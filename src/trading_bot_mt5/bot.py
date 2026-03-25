@@ -77,6 +77,7 @@ class TradeEngine:
         logging.info("[Engine] Starting main trading loop")
         while True:
             if self.trading_date.date() != datetime.now().date():
+                self.mt.close_all_positions()  # Закрываем все позиции при старте (можно убрать в продакшене)
                 self.reset_daily()
                 self.trading_date = datetime.now()
 
