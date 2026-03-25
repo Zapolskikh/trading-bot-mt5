@@ -45,6 +45,7 @@ class TradeEngine:
             risk_reward_target=2,
             use_range_stop_loss=True,
             stop_loss_buffer_pct=0.55,
+            lots=self.config["app"]["lots"] or 0.5,
         )
         self.strategy = ORBStrategy(self.orb_config)
 
@@ -119,7 +120,7 @@ class TradeEngine:
                             timestamp=datetime.now().isoformat(),
                             symbol=symbol,
                             side="buy" if signal.signal_type.value == "LONG" else "sell",
-                            type="market",
+                            type="limit",
                             price=signal.entry_price,
                             lots=signal.lots,
                             sl=signal.stop_loss,

@@ -3,6 +3,7 @@ app:
   symbols: ["US500.cash", "US100.cash", "US30.cash"]
   base_timeframe: "M1"
   data_window: 500
+  lots: 0.5
 
 risk:
   per_trade_pct: 0.5

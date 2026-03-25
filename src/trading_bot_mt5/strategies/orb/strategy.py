@@ -46,6 +46,8 @@ class ORBConfig:
     # Time filters
     no_trade_after: time = time(11, 00)  # Stop taking new trades after this time
 
+    lots: float = 0.5  # Default lot size for orders
+
 
 class ORBStrategy:
     """
@@ -286,7 +288,7 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
-            lots=0.5,
+            lots=self.config.lots,
             timestamp=candle.timestamp,
             entry_price=round(entry_price, 2),
             opening_range=self._opening_range,
@@ -377,7 +379,7 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
-            lots=0.5,
+            lots=self.config.lots,
             timestamp=candle.timestamp,
             entry_price=round(entry_price, 2),
             opening_range=self._opening_range,
