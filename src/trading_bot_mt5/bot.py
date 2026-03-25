@@ -49,7 +49,7 @@ class TradeEngine:
         self.strategy = ORBStrategy(self.orb_config)
 
         journal_cfg = self.config.get("journal", {})
-        self.journal = JournalService(journal_cfg.get("path", "./journal"), journal_cfg.get("rotate_daily", True))
+        self.journal = JournalService(journal_cfg.get("path", "./journal"))
         telegram_cfg = self.config.get("telegram", {})
         self.alerts = AlertService(enabled=telegram_cfg.get("enabled", False))
 
@@ -108,7 +108,7 @@ class TradeEngine:
                         resp = self.mt.place_order(
                             symbol=symbol,
                             side="buy" if signal.signal_type.value == "LONG" else "sell",
-                            volume=0.1,
+                            volume=signal.lots,
                             sl=signal.stop_loss,
                             tp=signal.take_profit,
                             order_type="limit",
@@ -121,12 +121,15 @@ class TradeEngine:
                             side="buy" if signal.signal_type.value == "LONG" else "sell",
                             type="market",
                             price=signal.entry_price,
-                            lots=1,
+                            lots=signal.lots,
                             sl=signal.stop_loss,
                             tp=signal.take_profit,
+                            sl_dollars=(signal.entry_price - signal.stop_loss) * signal.lots,
+                            tp_dollars=(signal.take_profit - signal.entry_price) * signal.lots,
                             status="PLACED",
                             order_id=order_id,
                             trade_id="",
+                            **self.mt.get_portfolio(),
                         )
                         # self.alerts.send_signal(signal.__dict__)
                         self.active_orders[symbol] = {order_id: signal}

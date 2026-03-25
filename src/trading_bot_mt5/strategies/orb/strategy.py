@@ -286,14 +286,14 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
-            lots=0.1,
+            lots=0.7,
             timestamp=candle.timestamp,
-            entry_price=entry_price,
+            entry_price=round(entry_price, 2),
             opening_range=self._opening_range,
             confirmation_candle=candle,
             confirmation_info=confirmation_info,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
+            stop_loss=round(stop_loss, 2) if stop_loss is not None else None,
+            take_profit=round(take_profit, 2) if take_profit is not None else None,
             metadata={
                 "range_period": self.config.range_period.value,
                 "range_timeframe": self.config.range_timeframe.value,
@@ -377,14 +377,14 @@ class ORBStrategy:
 
         signal = Signal(
             signal_type=signal_type,
-            lots=0.1,
+            lots=0.7,
             timestamp=candle.timestamp,
-            entry_price=entry_price,
+            entry_price=round(entry_price, 2),
             opening_range=self._opening_range,
             confirmation_candle=candle,
             confirmation_info=confirmation_info,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
+            stop_loss=round(stop_loss, 2) if stop_loss is not None else None,
+            take_profit=round(take_profit, 2) if take_profit is not None else None,
             metadata={
                 "range_period": self.config.range_period.value,
                 "range_timeframe": self.config.range_timeframe.value,

@@ -9,7 +9,7 @@ class JournalService:
     CSV-журналы: trades.csv, orders.csv, signals.csv
     """
 
-    def __init__(self, base_path: str = "./journal", rotate_daily: bool = True):
+    def __init__(self, base_path: str = "./journal", rotate_daily: bool = False):
         self.base_path = base_path
         self.rotate_daily = rotate_daily
         os.makedirs(self.base_path, exist_ok=True)
