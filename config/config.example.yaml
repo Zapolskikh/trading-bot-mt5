@@ -1,9 +1,15 @@
 app:
   mode: "paper"            # "live" | "paper" | "backtest"
-  symbols: ["US500.cash", "US100.cash", "US30.cash"]
+  shares:
+    - symbol: US500.cash
+      lots: 2.0
+    - symbol: US100.cash
+      lots: 0.6
+    - symbol: US30.cash
+      lots: 0.3
+  consecutive_closes: 3
   base_timeframe: "M1"
   data_window: 500
-  lots: 0.5
 
 risk:
   per_trade_pct: 0.5

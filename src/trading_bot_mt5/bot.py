@@ -40,12 +40,11 @@ class TradeEngine:
             session=ORB_SESSION,
             confirmation=ConfirmationConfig(
                 require_close=True,
-                consecutive_closes=2,
+                consecutive_closes=self.config["app"].get("consecutive_closes", 2),
             ),
             risk_reward_target=2,
             use_range_stop_loss=True,
-            stop_loss_buffer_pct=0.55,
-            lots=self.config["app"]["lots"] or 0.5,
+            stop_loss_buffer_pct=0.60,
         )
         self.strategy = ORBStrategy(self.orb_config)
 
@@ -81,7 +80,9 @@ class TradeEngine:
                 self.reset_daily()
                 self.trading_date = datetime.now()
 
-            for symbol in self.config["app"]["symbols"]:
+            for share in self.config["app"]["shares"]:
+                symbol = share["symbol"]
+                lots = share["lots"]
                 df = self.mt.get_market_data(
                     symbol, self.config["app"]["base_timeframe"], self.config["app"]["data_window"]
                 )
@@ -110,7 +111,7 @@ class TradeEngine:
                         resp = self.mt.place_order(
                             symbol=symbol,
                             side="buy" if signal.signal_type.value == "LONG" else "sell",
-                            volume=signal.lots,
+                            volume=lots,
                             sl=signal.stop_loss,
                             tp=signal.take_profit,
                             order_type="limit",
@@ -123,11 +124,11 @@ class TradeEngine:
                             side="buy" if signal.signal_type.value == "LONG" else "sell",
                             type="limit",
                             price=signal.entry_price,
-                            lots=signal.lots,
+                            lots=lots,
                             sl=signal.stop_loss,
                             tp=signal.take_profit,
-                            sl_dollars=round(abs((signal.entry_price - signal.stop_loss) * signal.lots), 2),
-                            tp_dollars=round(abs((signal.take_profit - signal.entry_price) * signal.lots), 2),
+                            sl_dollars=round(abs((signal.entry_price - signal.stop_loss) * lots), 2),
+                            tp_dollars=round(abs((signal.take_profit - signal.entry_price) * lots), 2),
                             status="PLACED",
                             order_id=order_id,
                             trade_id="",
