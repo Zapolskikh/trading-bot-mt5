@@ -79,7 +79,7 @@ class MetaTraderClient:
         return retcode in success_codes
 
     def get_market_data(
-        self, symbol: str, timeframe: str, window: int, timezone: str = "America/New_York"
+        self, symbol: str, timeframe: str, window: int, timezone: str = "America/New_York", debug: bool = False
     ) -> pd.DataFrame:
         """Fetch OHLCV bars as pandas DataFrame indexed by time."""
         if timeframe not in self.TIMEFRAMES:
@@ -107,7 +107,7 @@ class MetaTraderClient:
             last = df.index[-1].to_pydatetime().replace(second=0, microsecond=0)
             is_equal = now == last
 
-            if is_equal:
+            if is_equal or debug:
                 return df
             time.sleep(0.5)
         return pd.DataFrame()

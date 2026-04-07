@@ -103,6 +103,16 @@ def create_signal_markers(
             }
         )
 
+    if signal.vwap is not None:
+        hlines.append(
+            {
+                "hlines": signal.vwap,
+                "colors": "blue",
+                "linestyle": "-.",
+                "linewidths": 1.5,
+            }
+        )
+
     return addplots, hlines
 
 
@@ -213,6 +223,18 @@ def _build_legend(
                     linestyle="-",
                     linewidth=2.0,
                     label=f"Take Profit ({signal.take_profit:.5g})",
+                )
+            )
+
+        if signal.vwap is not None:
+            handles.append(
+                mlines.Line2D(
+                    [],
+                    [],
+                    color="blue",
+                    linestyle="-.",
+                    linewidth=1.5,
+                    label=f"VWAP ({signal.vwap:.5g})",
                 )
             )
 

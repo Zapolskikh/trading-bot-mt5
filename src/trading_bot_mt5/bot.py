@@ -6,8 +6,6 @@ from trading_bot_mt5.client import MetaTraderClient
 from trading_bot_mt5.common.config import load_config
 from trading_bot_mt5.services.csv_journal import JournalService
 from trading_bot_mt5.services.tg_alerts import AlertService
-
-# from trading_bot_mt5.strategies.orb.calculation import RangeSizeCalculator
 from trading_bot_mt5.strategies.orb.models import ORB_SESSION, RangePeriod, Timeframe
 from trading_bot_mt5.strategies.orb.strategy import ConfirmationConfig, ORBConfig, ORBStrategy
 from trading_bot_mt5.strategies.orb.visualization import plot_orb_chart
@@ -42,9 +40,11 @@ class TradeEngine:
                 require_close=True,
                 consecutive_closes=self.config["app"].get("consecutive_closes", 2),
             ),
-            risk_reward_target=2,
+            risk_reward_target=1.7,
             use_range_stop_loss=True,
-            stop_loss_buffer_pct=0.60,
+            stop_loss_buffer_pct=0.55,
+            min_range_size=self.config["app"].get("min_range_size"),
+            max_range_size=self.config["app"].get("max_range_size"),
         )
         self.strategy = ORBStrategy(self.orb_config)
 
@@ -84,10 +84,8 @@ class TradeEngine:
                 symbol = share["symbol"]
                 lots = share["lots"]
                 df = self.mt.get_market_data(
-                    symbol, self.config["app"]["base_timeframe"], self.config["app"]["data_window"]
+                    symbol, self.config["app"]["base_timeframe"], self.config["app"]["data_window"], debug=DEBUG
                 )
-                # _, max_orb_size = RangeSizeCalculator().opening_range_allowed(pd.DataFrame())
-
                 signals = self.strategy.process_candles(df)
 
                 if DEBUG:

@@ -2,12 +2,14 @@ app:
   mode: "paper"            # "live" | "paper" | "backtest"
   shares:
     - symbol: US500.cash
-      lots: 2.0
+      lots: 2.5
     - symbol: US100.cash
-      lots: 0.6
+      lots: 0.5
     - symbol: US30.cash
       lots: 0.3
-  consecutive_closes: 3
+  consecutive_closes: 4
+  min_range_size: 0.2
+  max_range_size: 0.8
   base_timeframe: "M1"
   data_window: 500
 

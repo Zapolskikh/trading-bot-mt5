@@ -125,15 +125,8 @@ class ORBStrategy:
         if self._opening_range is None:
             return False
 
-        range_size = self._opening_range.range_size
-
-        if self.config.min_range_size is not None:
-            if range_size < self.config.min_range_size:
-                return False
-
-        if self.config.max_range_size is not None:
-            if range_size > self.config.max_range_size:
-                return False
+        if self.config.min_range_size and self.config.max_range_size:
+            return self._opening_range.allowed_range_size(self.config.min_range_size, self.config.max_range_size)
 
         return True
 
@@ -323,13 +316,42 @@ class ORBStrategy:
         # Normalize input to list of Candles
         candle_list = normalize_candle_data(candles)
 
+        # VWAP
+        vwap = self._calculate_vwap(candles)
+        print(f"Calculated VWAP: {vwap} and {vwap} >=< {candle_list[-1].close}")
+
         signals = []
         for candle in candle_list:
             if self.config.session.is_within_session(candle.timestamp):
                 signal = self.process_candle(candle)
                 if signal is not None:
+                    signal.vwap = vwap
                     signals.append(signal)
         return signals
+
+    def _calculate_vwap(self, candles: list[Candle] | pd.DataFrame) -> float:
+        """Calculate VWAP for the given candles."""
+        if isinstance(candles, pd.DataFrame):
+            df = candles
+        else:
+            df = pd.DataFrame([c.__dict__ for c in candles])
+
+        if df.empty:
+            return 0
+
+        # Filter for regular market hours (>= 09:30 ET)
+        market_mask = (df.index.hour > 9) | ((df.index.hour == 9) & (df.index.minute >= 30))
+        df = df[market_mask].copy()
+
+        if df.empty:
+            return 0
+
+        typical_price = (df["high"] + df["low"] + df["close"]) / 3
+        tp_volume = typical_price * df["volume"]
+
+        daily_vol_cum = df["volume"].groupby(pd.Grouper(freq="D")).cumsum()
+        df["VWAP"] = tp_volume.groupby(pd.Grouper(freq="D")).cumsum() / daily_vol_cum
+        return round(df["VWAP"].iloc[-1], 2)
 
     def process_dataframe(self, df: pd.DataFrame) -> list[Signal]:
         """
