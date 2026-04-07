@@ -318,7 +318,6 @@ class ORBStrategy:
 
         # VWAP
         vwap = self._calculate_vwap(candles)
-        print(f"Calculated VWAP: {vwap} and {vwap} >=< {candle_list[-1].close}")
 
         signals = []
         for candle in candle_list:
