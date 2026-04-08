@@ -306,7 +306,7 @@ class ORBStrategy:
         self._signal_generated = True
         return signal
 
-    def process_candles(self, candles: list[Candle] | pd.DataFrame) -> list[Signal]:
+    def process_candles(self, candles: list[Candle] | pd.DataFrame, debug: bool = False) -> list[Signal]:
         """
         Process multiple candles and return all generated signals.
         """
@@ -324,6 +324,12 @@ class ORBStrategy:
             if self.config.session.is_within_session(candle.timestamp):
                 signal = self.process_candle(candle)
                 if signal is not None:
+                    if signal.signal_type == SignalType.LONG and signal.entry_price < vwap and not debug:
+                        continue  # Skip long signals below VWAP
+
+                    if signal.signal_type == SignalType.SHORT and signal.entry_price > vwap and not debug:
+                        continue  # Skip short signals above VWAP
+
                     signal.vwap = vwap
                     signals.append(signal)
         return signals

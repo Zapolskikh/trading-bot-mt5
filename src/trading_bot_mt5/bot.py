@@ -86,14 +86,18 @@ class TradeEngine:
                 df = self.mt.get_market_data(
                     symbol, self.config["app"]["base_timeframe"], self.config["app"]["data_window"], debug=DEBUG
                 )
-                signals = self.strategy.process_candles(df)
+                signals = self.strategy.process_candles(df, debug=DEBUG)
 
                 if DEBUG:
                     plot_orb_chart(
                         df,
                         opening_range=self.strategy.opening_range,
                         signal=signals[0] if signals else None,
-                        title=f"ORB Strategy - {symbol} ({self.orb_config.range_period.value}min Range)",
+                        title=(
+                            f"ORB Strategy - {symbol} Range: {self.orb_config.range_period.value}min Range Size:"
+                            f" {self.strategy.opening_range.range_size:.2f} Range Pct:"
+                            f" {self.strategy.opening_range.range_pct:.2f}"
+                        ),
                         style="yahoo",
                         show_volume=False,
                         show_midpoint=True,

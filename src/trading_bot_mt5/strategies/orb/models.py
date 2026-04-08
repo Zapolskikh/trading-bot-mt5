@@ -46,7 +46,7 @@ class Candle:
             raise ValueError("Low must be <= Open and Close")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class OpeningRange:
     """The opening range high/low for a session."""
 
@@ -54,6 +54,7 @@ class OpeningRange:
     low: float
     start_time: datetime
     end_time: datetime
+    range_pct: float = 0.0
 
     @property
     def range_size(self) -> float:
@@ -75,8 +76,8 @@ class OpeningRange:
 
     def allowed_range_size(self, range_min: float, range_max: float) -> bool:
         """Check if the range size is within allowed limits."""
-        range_pct = (self.high - self.low) / self.midpoint * 100
-        return range_min <= range_pct <= range_max
+        self.range_pct = (self.high - self.low) / self.midpoint * 100
+        return range_min <= self.range_pct <= range_max
 
 
 @dataclass(frozen=True, slots=True)
