@@ -12,6 +12,7 @@ app:
   max_range_size: 0.8
   base_timeframe: "M1"
   data_window: 500
+  use_order_expiration: 1
 
 risk:
   per_trade_pct: 0.5

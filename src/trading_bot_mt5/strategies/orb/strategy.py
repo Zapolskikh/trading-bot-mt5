@@ -271,9 +271,7 @@ class ORBStrategy:
 
         # Generate signal
         entry_price = (
-            (candle.close + self._opening_range.high) / 2
-            if signal_type == SignalType.LONG
-            else (candle.close + self._opening_range.low) / 2
+            round(self._opening_range.high, 2) if signal_type == SignalType.LONG else round(self._opening_range.low, 2)
         )
         stop_loss = self._calculate_stop_loss(signal_type)
         take_profit = None

@@ -40,9 +40,9 @@ class TradeEngine:
                 require_close=True,
                 consecutive_closes=self.config["app"].get("consecutive_closes", 2),
             ),
-            risk_reward_target=1.7,
+            risk_reward_target=1.5,
             use_range_stop_loss=True,
-            stop_loss_buffer_pct=0.55,
+            stop_loss_buffer_pct=1.05,
             min_range_size=self.config["app"].get("min_range_size"),
             max_range_size=self.config["app"].get("max_range_size"),
         )
@@ -88,7 +88,7 @@ class TradeEngine:
                 )
                 signals = self.strategy.process_candles(df, debug=DEBUG)
 
-                if DEBUG:
+                if DEBUG and signals:
                     plot_orb_chart(
                         df,
                         opening_range=self.strategy.opening_range,
@@ -117,6 +117,11 @@ class TradeEngine:
                             sl=signal.stop_loss,
                             tp=signal.take_profit,
                             order_type="limit",
+                            expiration=(
+                                int(time.time()) + 7200
+                                if bool(int(self.config["app"].get("use_order_expiration", 0)))
+                                else None
+                            ),  # 2 часа
                             price=signal.entry_price,
                         )
                         order_id = str(resp.get("ticket", ""))
